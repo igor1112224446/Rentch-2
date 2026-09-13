@@ -12,6 +12,8 @@ export type TbilisiDistrict =
   | 'Багеби (Bagebi)'
   | 'Диди Дигоми (Didi Dighomi)';
 
+export type Currency = 'USD' | 'GEL';
+
 export type FurnitureStatus = 'full' | 'partial' | 'none';
 
 export type PetPolicy = 'allowed' | 'cats_only' | 'dogs_only' | 'no_pets';
@@ -32,6 +34,9 @@ export interface Apartment {
   district: TbilisiDistrict;
   address: string;
   priceUsd: number;
+  currency?: Currency;
+  priceGel?: number;
+  originalPrice?: number;
   rooms: number;
   bedrooms: number;
   areaSqm: number;
@@ -110,7 +115,7 @@ export interface NotificationItem {
   title: string;
   message: string;
   timestamp: string;
-  apartmentId: string;
+  apartmentId?: string;
   read: boolean;
   type: 'match' | 'new_listing' | 'viewing_confirmed';
 }

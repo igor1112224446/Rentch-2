@@ -95,7 +95,10 @@ export const MatchesSection: React.FC<MatchesSectionProps> = ({
                 </div>
 
                 <div className="absolute bottom-2.5 inset-x-3 text-white">
-                  <div className="text-xl font-extrabold">${apt.priceUsd} <span className="text-xs font-normal text-stone-300">/ мес</span></div>
+                  <div className="text-xl font-extrabold">
+                    {apt.currency === 'GEL' ? `${apt.priceGel || Math.round(apt.priceUsd * 2.72)} ₾` : `$${apt.priceUsd}`}{' '}
+                    <span className="text-xs font-normal text-stone-300">/ мес</span>
+                  </div>
                   <p className="text-xs text-stone-200 truncate mt-0.5">{apt.title}</p>
                 </div>
               </div>

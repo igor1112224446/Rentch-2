@@ -24,11 +24,23 @@ import {
   Home, 
   MapPin, 
   AlertCircle,
-  FileCheck
+  FileCheck,
+  Smartphone,
+  AlertTriangle,
+  Image as ImageIcon,
+  ExternalLink,
+  ChevronRight as ChevronRightIcon,
+  Archive,
+  FolderArchive,
+  Layers,
+  Check
 } from 'lucide-react';
-import { CrmLead, CrmStage, Apartment, TbilisiDistrict, FurnitureStatus, PetPolicy, LeasePeriod } from '../types';
+import { CrmLead, CrmStage, Apartment, TbilisiDistrict, FurnitureStatus, PetPolicy, LeasePeriod, Currency } from '../types';
 import { TBILISI_DISTRICTS } from '../data/mockApartments';
 import { RentchLogo } from './RentchLogo';
+import { AdminPwaSection } from './AdminPwaSection';
+import { parseApartmentPdf, ExtractedPdfApartment } from '../utils/pdfParser';
+import { parseZipArchive, ExtractedZipResult } from '../utils/zipParser';
 
 interface AdminPanelProps {
   leads: CrmLead[];
@@ -36,9 +48,14 @@ interface AdminPanelProps {
   apartments: Apartment[];
   onAddApartment: (apartment: Apartment) => void;
   onDeleteApartment: (id: string) => void;
+  onClearAllApartments?: () => void;
+  onClearAllLeads?: () => void;
   onClose: () => void;
   onAuthSuccess?: () => void;
   onLogout?: () => void;
+  onViewApartment?: (apartment: Apartment) => void;
+  onSwitchToSwipe?: () => void;
+  onUpdateApartment?: (apartment: Apartment) => void;
 }
 
 const STAGES: { key: CrmStage; title: string; color: string; bg: string; border: string }[] = [
@@ -78,7 +95,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   apartments,
   onAddApartment,
   onDeleteApartment,
+  onClearAllApartments,
+  onClearAllLeads,
   onClose,
+  onAuthSuccess,
+  onLogout,
+  onViewApartment,
+  onSwitchToSwipe,
+  onUpdateApartment,
 }) => {
   // Authentication State
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
@@ -89,7 +113,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [authError, setAuthError] = useState('');
 
   // Admin Section Navigation
-  const [adminTab, setAdminTab] = useState<'crm' | 'upload_form' | 'upload_pdf' | 'catalog'>('crm');
+  const [adminTab, setAdminTab] = useState<'crm' | 'upload_form' | 'upload_pdf' | 'catalog' | 'pwa'>('crm');
+
+  // Deletion Confirmation Dialogs
+  const [leadToDelete, setLeadToDelete] = useState<CrmLead | null>(null);
+  const [isDeleteAllLeadsOpen, setIsDeleteAllLeadsOpen] = useState(false);
+  const [aptToDelete, setAptToDelete] = useState<Apartment | null>(null);
+  const [isDeleteAllAptsOpen, setIsDeleteAllAptsOpen] = useState(false);
 
   // Search & Filters in CRM
   const [searchQuery, setSearchQuery] = useState('');
@@ -106,7 +136,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [formTitle, setFormTitle] = useState('');
   const [formDistrict, setFormDistrict] = useState<TbilisiDistrict>('Ваке (Vake)');
   const [formAddress, setFormAddress] = useState('');
-  const [formPriceUsd, setFormPriceUsd] = useState<number>(750);
+  const [formCurrency, setFormCurrency] = useState<Currency>('USD');
+  const [formPriceAmount, setFormPriceAmount] = useState<number>(750);
   const [formRooms, setFormRooms] = useState<number>(2);
   const [formBedrooms, setFormBedrooms] = useState<number>(1);
   const [formAreaSqm, setFormAreaSqm] = useState<number>(55);
@@ -117,25 +148,27 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [formMinPeriod, setFormMinPeriod] = useState<LeasePeriod>('month_to_year');
   const [formMetro, setFormMetro] = useState('');
   const [formDescription, setFormDescription] = useState('');
-  const [formImageUrl, setFormImageUrl] = useState('https://images.unsplash.com/photo-1502672260266-1c1ef2d93688?auto=format&fit=crop&w=1200&q=80');
+  const [formImages, setFormImages] = useState<string[]>([
+    'https://images.unsplash.com/photo-1502672260266-1c1ef2d93688?auto=format&fit=crop&w=1200&q=80',
+    'https://images.unsplash.com/photo-1560448204-e02f11c3d0e2?auto=format&fit=crop&w=1200&q=80',
+  ]);
+  const [formNewImageUrl, setFormNewImageUrl] = useState('');
+  const [isFormZipExtracting, setIsFormZipExtracting] = useState(false);
+  const [formZipNotice, setFormZipNotice] = useState('');
   const [formSuccessMessage, setFormSuccessMessage] = useState('');
 
-  // PDF Upload State
-  const [selectedPdfFile, setSelectedPdfFile] = useState<File | null>(null);
+  // PDF & ZIP Archive Upload & Extraction State
+  const [selectedUploadFile, setSelectedUploadFile] = useState<File | null>(null);
   const [isPdfProcessing, setIsPdfProcessing] = useState(false);
-  const [pdfExtractedData, setPdfExtractedData] = useState<{
-    title: string;
-    district: TbilisiDistrict;
-    address: string;
-    priceUsd: number;
-    rooms: number;
-    areaSqm: number;
-    furniture: FurnitureStatus;
-    petPolicy: PetPolicy;
-    description: string;
-    extractedFile: string;
-  } | null>(null);
+  const [pdfProcessingStep, setPdfProcessingStep] = useState<string>('');
+  const [isDraggingPdf, setIsDraggingPdf] = useState(false);
+  const [pdfExtractedData, setPdfExtractedData] = useState<ExtractedPdfApartment | null>(null);
+  const [pdfSuccessApartment, setPdfSuccessApartment] = useState<Apartment | null>(null);
   const [pdfSuccessMessage, setPdfSuccessMessage] = useState('');
+  const [pdfError, setPdfError] = useState('');
+  const [showRawText, setShowRawText] = useState(false);
+  const [newPhotoUrlInput, setNewPhotoUrlInput] = useState('');
+  const [catalogZipToast, setCatalogZipToast] = useState('');
 
   // Handle Login
   const handleLogin = (e: React.FormEvent) => {
@@ -205,10 +238,55 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     setNewLeadNotes('');
   };
 
-  // Delete lead
-  const handleDeleteLead = (leadId: string) => {
-    if (window.confirm('Удалить эту карточку из CRM?')) {
-      onUpdateLeads(leads.filter((l) => l.id !== leadId));
+  // Delete lead with reliable in-app modal confirmation
+  const handleRequestDeleteLead = (lead: CrmLead) => {
+    setLeadToDelete(lead);
+  };
+
+  const handleConfirmDeleteLead = () => {
+    if (!leadToDelete) return;
+    onUpdateLeads(leads.filter((l) => l.id !== leadToDelete.id));
+    setLeadToDelete(null);
+  };
+
+  const handleConfirmClearAllLeads = () => {
+    onUpdateLeads([]);
+    onClearAllLeads?.();
+    setIsDeleteAllLeadsOpen(false);
+  };
+
+  const handleRequestDeleteApartment = (apt: Apartment) => {
+    setAptToDelete(apt);
+  };
+
+  const handleConfirmDeleteApartment = () => {
+    if (!aptToDelete) return;
+    onDeleteApartment(aptToDelete.id);
+    setAptToDelete(null);
+  };
+
+  const handleConfirmClearAllApartments = () => {
+    if (onClearAllApartments) {
+      onClearAllApartments();
+    } else {
+      apartments.forEach((a) => onDeleteApartment(a.id));
+    }
+    setIsDeleteAllAptsOpen(false);
+  };
+
+  // Currency toggle handler with intelligent auto-conversion
+  const handleFormCurrencyChange = (newCurrency: Currency) => {
+    if (newCurrency === formCurrency) return;
+    if (newCurrency === 'GEL') {
+      setFormCurrency('GEL');
+      if (formPriceAmount) {
+        setFormPriceAmount(Math.round(formPriceAmount * 2.72));
+      }
+    } else {
+      setFormCurrency('USD');
+      if (formPriceAmount) {
+        setFormPriceAmount(Math.round(formPriceAmount / 2.72));
+      }
     }
   };
 
@@ -217,12 +295,24 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     e.preventDefault();
     if (!formTitle.trim() || !formAddress.trim()) return;
 
+    const parsedAmount = Number(formPriceAmount) || (formCurrency === 'USD' ? 750 : 2040);
+    const priceUsd = formCurrency === 'USD'
+      ? Math.round(parsedAmount)
+      : Math.round(parsedAmount / 2.72);
+
+    const priceGel = formCurrency === 'GEL'
+      ? Math.round(parsedAmount)
+      : Math.round(parsedAmount * 2.72);
+
     const newApt: Apartment = {
       id: 'apt-custom-' + Date.now(),
       title: formTitle.trim(),
       district: formDistrict,
       address: formAddress.trim(),
-      priceUsd: Number(formPriceUsd) || 700,
+      priceUsd,
+      priceGel,
+      currency: formCurrency,
+      originalPrice: parsedAmount,
       rooms: Number(formRooms) || 2,
       bedrooms: Number(formBedrooms) || 1,
       areaSqm: Number(formAreaSqm) || 50,
@@ -232,10 +322,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       petPolicy: formPetPolicy,
       minPeriod: formMinPeriod,
       maxResidents: formRooms * 2,
-      images: [
-        formImageUrl || 'https://images.unsplash.com/photo-1502672260266-1c1ef2d93688?auto=format&fit=crop&w=1200&q=80',
-        'https://images.unsplash.com/photo-1560448204-e02f11c3d0e2?auto=format&fit=crop&w=1200&q=80',
-      ],
+      images: formImages.length > 0 
+        ? formImages 
+        : [
+            'https://images.unsplash.com/photo-1502672260266-1c1ef2d93688?auto=format&fit=crop&w=1200&q=80',
+            'https://images.unsplash.com/photo-1560448204-e02f11c3d0e2?auto=format&fit=crop&w=1200&q=80',
+          ],
       description: formDescription.trim() || 'Светлая, уютная квартира со свежим ремонтом и всей необходимой бытовой техникой в Тбилиси.',
       amenities: ['Кондиционер', 'Стиральная машина', 'Wi-Fi', 'Отопление Karma/Центральное', 'Балкон'],
       lat: 41.7151 + (Math.random() - 0.5) * 0.04,
@@ -254,49 +346,254 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     };
 
     onAddApartment(newApt);
-    setFormSuccessMessage(`Объект «${newApt.title}» успешно опубликован и доступен в свайпах и на карте!`);
+    const priceDisplay = formCurrency === 'GEL'
+      ? `${priceGel} ₾ / мес (~$${priceUsd})`
+      : `$${priceUsd} / мес (~${priceGel} ₾)`;
+    setFormSuccessMessage(`Объект «${newApt.title}» (${priceDisplay}, ${newApt.images.length} фото) успешно опубликован и доступен в свайпах и на карте!`);
     setFormTitle('');
     setFormAddress('');
     setFormDescription('');
+    setFormImages([
+      'https://images.unsplash.com/photo-1502672260266-1c1ef2d93688?auto=format&fit=crop&w=1200&q=80',
+      'https://images.unsplash.com/photo-1560448204-e02f11c3d0e2?auto=format&fit=crop&w=1200&q=80',
+    ]);
     setTimeout(() => setFormSuccessMessage(''), 5000);
   };
 
-  // Simulate PDF Upload & Metadata extraction
-  const handleSimulatePdfUpload = (filename: string, mockData: typeof pdfExtractedData) => {
-    setIsPdfProcessing(true);
-    setPdfSuccessMessage('');
-    setTimeout(() => {
-      setIsPdfProcessing(false);
-      setPdfExtractedData(mockData);
-    }, 1200);
+  // ZIP Archive upload handler for manual form
+  const handleUploadFormZip = async (file: File) => {
+    setIsFormZipExtracting(true);
+    setFormZipNotice(`Распаковка архива «${file.name}»...`);
+    try {
+      const result = await parseZipArchive(file);
+      if (result.imageUrls.length === 0) {
+        setFormZipNotice(`В архиве «${file.name}» не обнаружено файлов изображений (.jpg, .png, .webp).`);
+        return;
+      }
+      setFormImages(result.imageUrls);
+      setFormZipNotice(`Успешно распаковано ${result.totalImagesCount} фото! Все фотографии прогружены в карточку по отдельности.`);
+      if (result.extractedTextNotes && !formDescription) {
+        setFormDescription(result.extractedTextNotes);
+      }
+      setTimeout(() => setFormZipNotice(''), 6000);
+    } catch (err: any) {
+      console.error('Error unpacking zip in form:', err);
+      setFormZipNotice('Ошибка распаковки архива. Убедитесь, что файл является корректным .zip архивом.');
+      setTimeout(() => setFormZipNotice(''), 4000);
+    } finally {
+      setIsFormZipExtracting(false);
+    }
   };
 
+  // Real PDF & ZIP Archive File Upload & Extraction Handler
+  const handleProcessArchiveOrPdfFile = async (file: File) => {
+    const isZip = file.name.toLowerCase().endsWith('.zip') || file.type === 'application/zip' || file.type === 'application/x-zip-compressed';
+    const isPdf = file.name.toLowerCase().endsWith('.pdf') || file.type === 'application/pdf';
+
+    if (!isZip && !isPdf) {
+      setPdfError('Пожалуйста, выберите файл в формате .ZIP (архив с фото) или .PDF (презентация объекта)');
+      return;
+    }
+
+    setSelectedUploadFile(file);
+    setIsPdfProcessing(true);
+    setPdfSuccessMessage('');
+    setPdfSuccessApartment(null);
+    setPdfError('');
+
+    if (isZip) {
+      setPdfProcessingStep(`Распаковка ZIP-архива «${file.name}» и извлечение фотографий по отдельности...`);
+      try {
+        const zipResult = await parseZipArchive(file);
+        if (zipResult.images.length === 0) {
+          setPdfError(`В архиве «${file.name}» не найдено файлов фотографий (.jpg, .png, .webp). Проверьте содержимое архива.`);
+          return;
+        }
+
+        let titleGuess = file.name.replace(/\.[^/.]+$/, '').replace(/[_\\-]/g, ' ');
+        let districtGuess: TbilisiDistrict = 'Ваке (Vake)';
+        let priceGuess = 850;
+
+        const combinedText = (file.name + ' ' + (zipResult.extractedTextNotes || '')).toLowerCase();
+        if (combinedText.includes('сабуртало') || combinedText.includes('saburtalo')) {
+          districtGuess = 'Сабуртало (Saburtalo)';
+        } else if (combinedText.includes('мтацминда') || combinedText.includes('mtatsminda')) {
+          districtGuess = 'Мтацминда (Mtatsminda)';
+        } else if (combinedText.includes('вера') || combinedText.includes('vera')) {
+          districtGuess = 'Вера (Vera)';
+        } else if (combinedText.includes('чугурети') || combinedText.includes('chugureti') || combinedText.includes('марджанишвили')) {
+          districtGuess = 'Чугурети / Марджанишвили';
+        } else if (combinedText.includes('багеби') || combinedText.includes('bagebi')) {
+          districtGuess = 'Багеби (Bagebi)';
+        } else if (combinedText.includes('дидубе') || combinedText.includes('didube')) {
+          districtGuess = 'Дидубе (Didube)';
+        } else if (combinedText.includes('исани') || combinedText.includes('isani')) {
+          districtGuess = 'Исани (Isani)';
+        }
+
+        const priceMatch = (zipResult.extractedTextNotes || '').match(/\$?\s*(\d{3,4})\s*(?:\$|usd|долл|\/мес)?/i);
+        if (priceMatch && priceMatch[1]) {
+          const p = parseInt(priceMatch[1], 10);
+          if (p >= 250 && p <= 10000) priceGuess = p;
+        }
+
+        setPdfExtractedData({
+          title: titleGuess || `Квартира в Тбилиси (${districtGuess})`,
+          district: districtGuess,
+          address: `г. Тбилиси, район ${districtGuess.split(' ')[0]}`,
+          priceUsd: priceGuess,
+          rooms: 2,
+          bedrooms: 1,
+          areaSqm: 60,
+          floor: 4,
+          totalFloors: 10,
+          furniture: 'full',
+          petPolicy: 'allowed',
+          description: zipResult.extractedTextNotes || `Светлая уютная квартира в Тбилиси. Все ${zipResult.totalImagesCount} фотографий извлечены по отдельности из архива «${file.name}» и готовы к показу клиентам. Качественный ремонт, полный комплект бытовой техники и мебели.`,
+          amenities: ['Кондиционер', 'Стиральная машина', 'Wi-Fi', 'Центральное отопление', 'Балкон', 'Оборудованная кухня'],
+          images: zipResult.imageUrls,
+          extractedFile: file.name,
+          rawTextPreview: `ZIP-архив: ${file.name}\nВсего извлечено фото: ${zipResult.totalImagesCount} шт.\n\nСписок файлов в архиве:\n` +
+            zipResult.images.map((img, i) => `${i + 1}. ${img.name} (${Math.round(img.sizeBytes / 1024)} KB)`).join('\n') +
+            (zipResult.extractedTextNotes ? `\n\nТекстовые заметки из архива:\n${zipResult.extractedTextNotes}` : ''),
+          sourceType: 'zip',
+          zipFileNames: zipResult.images.map((i) => i.name),
+        });
+
+        setPdfSuccessMessage(`Из архива «${file.name}» успешно извлечено ${zipResult.totalImagesCount} фото! Все фотографии прогружены в карточку по отдельности.`);
+      } catch (err: any) {
+        console.error('Error parsing zip file:', err);
+        setPdfError('Не удалось распаковать ZIP-архив. Убедитесь, что файл является корректным .zip архивом.');
+      } finally {
+        setIsPdfProcessing(false);
+        setPdfProcessingStep('');
+      }
+    } else {
+      // PDF processing
+      setPdfProcessingStep('Распознавание страниц PDF и извлечение фотографий...');
+      try {
+        const extracted = await parseApartmentPdf(file);
+        setPdfExtractedData({
+          ...extracted,
+          sourceType: 'pdf',
+        });
+      } catch (err: any) {
+        console.error('Error parsing PDF file:', err);
+        setPdfError('Внимание: не все текстовые блоки удалось распознать автоматически (возможно, сканированный PDF). Базовые поля заполнены, проверьте и скорректируйте их перед публикацией.');
+        setPdfExtractedData({
+          title: file.name.replace(/\.[^/.]+$/, '').replace(/[_\\-]/g, ' ') || 'Квартира в Тбилиси',
+          district: 'Ваке (Vake)',
+          address: 'Тбилиси, район Ваке',
+          priceUsd: 850,
+          rooms: 2,
+          bedrooms: 1,
+          areaSqm: 55,
+          floor: 4,
+          totalFloors: 9,
+          furniture: 'full',
+          petPolicy: 'allowed',
+          description: 'Уютная и светлая квартира со свежим ремонтом и мебелью по материалам PDF-презентации.',
+          amenities: ['Кондиционер', 'Стиральная машина', 'Wi-Fi', 'Центральное отопление', 'Балкон'],
+          images: ['https://images.unsplash.com/photo-1502672260266-1c1ef2d93688?auto=format&fit=crop&w=1200&q=80'],
+          extractedFile: file.name,
+          rawTextPreview: 'Файл: ' + file.name,
+          sourceType: 'pdf',
+        });
+      } finally {
+        setIsPdfProcessing(false);
+        setPdfProcessingStep('');
+      }
+    }
+  };
+
+  // Update existing apartment photos from ZIP archive in catalog
+  const handleUpdateApartmentPhotosFromZip = async (apt: Apartment, file: File) => {
+    setCatalogZipToast(`Распаковка архива «${file.name}» для объекта «${apt.title}»...`);
+    try {
+      const result = await parseZipArchive(file);
+      if (result.imageUrls.length === 0) {
+        setCatalogZipToast(`В архиве «${file.name}» не найдено файлов изображений.`);
+        setTimeout(() => setCatalogZipToast(''), 4000);
+        return;
+      }
+      const updatedApt: Apartment = {
+        ...apt,
+        images: result.imageUrls,
+      };
+      onUpdateApartment?.(updatedApt);
+      setCatalogZipToast(`Успешно прогружено ${result.totalImagesCount} фото из архива в карточку «${apt.title}»!`);
+      setTimeout(() => setCatalogZipToast(''), 6000);
+    } catch (e) {
+      console.error(e);
+      setCatalogZipToast('Ошибка распаковки архива.');
+      setTimeout(() => setCatalogZipToast(''), 4000);
+    }
+  };
+
+  // Preset Sample PDF Handler (allows 1-click test with real photos and Tbilisi details)
+  const handleSelectSamplePdf = (sampleData: ExtractedPdfApartment) => {
+    setIsPdfProcessing(true);
+    setPdfProcessingStep('Извлечение характеристик и фото из образца...');
+    setPdfSuccessMessage('');
+    setPdfSuccessApartment(null);
+    setPdfError('');
+    setTimeout(() => {
+      setIsPdfProcessing(false);
+      setPdfProcessingStep('');
+      setPdfExtractedData(sampleData);
+    }, 500);
+  };
+
+  // Publish PDF apartment to Rentch database and offer directly to clients in cards
   const handleImportPdfApartment = () => {
     if (!pdfExtractedData) return;
 
+    // Approximate district coordinates in Tbilisi
+    let lat = 41.7151;
+    let lng = 44.7874;
+    const districtLower = pdfExtractedData.district.toLowerCase();
+    if (districtLower.includes('ваке') || districtLower.includes('vake')) {
+      lat = 41.7118; lng = 44.7571;
+    } else if (districtLower.includes('сабуртало') || districtLower.includes('saburtalo')) {
+      lat = 41.7289; lng = 44.7645;
+    } else if (districtLower.includes('вера') || districtLower.includes('vera')) {
+      lat = 41.7082; lng = 44.7834;
+    } else if (districtLower.includes('мтацминда') || districtLower.includes('mtatsminda')) {
+      lat = 41.6961; lng = 44.7938;
+    } else if (districtLower.includes('чугурети') || districtLower.includes('chugureti')) {
+      lat = 41.7126; lng = 44.8015;
+    } else if (districtLower.includes('дидубе') || districtLower.includes('didube')) {
+      lat = 41.7456; lng = 44.7789;
+    } else if (districtLower.includes('багеби') || districtLower.includes('bagebi')) {
+      lat = 41.7089; lng = 44.7321;
+    } else if (districtLower.includes('исани') || districtLower.includes('isani')) {
+      lat = 41.6892; lng = 44.8398;
+    }
+
     const newApt: Apartment = {
-      id: 'apt-pdf-' + Date.now(),
-      title: pdfExtractedData.title,
-      district: pdfExtractedData.district,
-      address: pdfExtractedData.address,
-      priceUsd: pdfExtractedData.priceUsd,
-      rooms: pdfExtractedData.rooms,
-      bedrooms: Math.max(1, pdfExtractedData.rooms - 1),
-      areaSqm: pdfExtractedData.areaSqm,
-      floor: 5,
-      totalFloors: 12,
-      furniture: pdfExtractedData.furniture,
-      petPolicy: pdfExtractedData.petPolicy,
+      id: (pdfExtractedData.sourceType === 'zip' ? 'apt-zip-' : 'apt-pdf-') + Date.now(),
+      title: pdfExtractedData.title.trim() || 'Апартаменты в Тбилиси',
+      district: (pdfExtractedData.district as TbilisiDistrict) || 'Ваке (Vake)',
+      address: pdfExtractedData.address.trim() || 'Тбилиси',
+      priceUsd: Number(pdfExtractedData.priceUsd) || 800,
+      rooms: Number(pdfExtractedData.rooms) || 2,
+      bedrooms: Number(pdfExtractedData.bedrooms) || Math.max(1, (Number(pdfExtractedData.rooms) || 2) - 1),
+      areaSqm: Number(pdfExtractedData.areaSqm) || 50,
+      floor: Number(pdfExtractedData.floor) || 4,
+      totalFloors: Number(pdfExtractedData.totalFloors) || 9,
+      furniture: pdfExtractedData.furniture || 'full',
+      petPolicy: pdfExtractedData.petPolicy || 'allowed',
       minPeriod: 'month_to_year',
-      maxResidents: pdfExtractedData.rooms * 2,
-      images: [
-        'https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&w=1200&q=80',
-        'https://images.unsplash.com/photo-1600566753190-17f0baa2a6c3?auto=format&fit=crop&w=1200&q=80',
-      ],
-      description: pdfExtractedData.description,
-      amenities: ['Панорамные окна', 'Центральное отопление', 'Кондиционер', 'Посудомоечная машина', 'Подземный паркинг'],
-      lat: 41.7100 + (Math.random() - 0.5) * 0.03,
-      lng: 44.7600 + (Math.random() - 0.5) * 0.03,
+      maxResidents: (Number(pdfExtractedData.rooms) || 2) * 2,
+      images: pdfExtractedData.images.length > 0 
+        ? pdfExtractedData.images 
+        : ['https://images.unsplash.com/photo-1502672260266-1c1ef2d93688?auto=format&fit=crop&w=1200&q=80'],
+      description: pdfExtractedData.description.trim() || 'Уютная современная квартира в Тбилиси.',
+      amenities: pdfExtractedData.amenities && pdfExtractedData.amenities.length > 0
+        ? pdfExtractedData.amenities
+        : ['Кондиционер', 'Стиральная машина', 'Wi-Fi', 'Центральное отопление', 'Балкон'],
+      lat: lat + (Math.random() - 0.5) * 0.015,
+      lng: lng + (Math.random() - 0.5) * 0.015,
       isNew: true,
       landlord: {
         id: 'landlord-pdf',
@@ -310,10 +607,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     };
 
     onAddApartment(newApt);
-    setPdfSuccessMessage(`Объект из PDF «${newApt.title}» успешно импортирован в общую ленту Rentch!`);
+    setPdfSuccessApartment(newApt);
+    const srcType = pdfExtractedData.sourceType === 'zip' ? 'ZIP-архива' : 'PDF';
+    setPdfSuccessMessage(`Объект из ${srcType} «${newApt.title}» успешно размещён в карточках Rentch! ${newApt.images.length} фото по отдельности, цена $${newApt.priceUsd} и описание загружены и предлагаются клиентам.`);
     setPdfExtractedData(null);
-    setSelectedPdfFile(null);
-    setTimeout(() => setPdfSuccessMessage(''), 5000);
+    setSelectedUploadFile(null);
   };
 
   // Unauthenticated Screen
@@ -443,13 +741,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             type="button"
             id="admin-tab-pdf-btn"
             onClick={() => setAdminTab('upload_pdf')}
-            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
               adminTab === 'upload_pdf'
                 ? 'bg-rose-500 text-white shadow-xs'
                 : 'text-stone-300 hover:text-white'
             }`}
           >
-            Загрузка: PDF-файл
+            <Archive className="w-3.5 h-3.5" />
+            <span>Загрузка: ZIP / PDF</span>
           </button>
 
           <button
@@ -463,6 +762,20 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             }`}
           >
             Каталог ({apartments.length})
+          </button>
+
+          <button
+            type="button"
+            id="admin-tab-pwa-btn"
+            onClick={() => setAdminTab('pwa')}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+              adminTab === 'pwa'
+                ? 'bg-rose-500 text-white shadow-xs'
+                : 'text-stone-300 hover:text-white'
+            }`}
+          >
+            <Smartphone className="w-3.5 h-3.5" />
+            <span>PWA-приложение</span>
           </button>
 
           <button
@@ -493,6 +806,19 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             </div>
 
             <div className="flex items-center gap-2">
+              {leads.length > 0 && (
+                <button
+                  type="button"
+                  id="clear-all-leads-btn"
+                  onClick={() => setIsDeleteAllLeadsOpen(true)}
+                  className="bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 font-bold px-3 py-2 rounded-xl text-xs flex items-center gap-1.5 transition-all cursor-pointer"
+                  title="Удалить всех клиентов из CRM"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Очистить CRM ({leads.length})</span>
+                </button>
+              )}
+
               <button
                 type="button"
                 id="add-lead-btn"
@@ -577,11 +903,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
                             <button
                               type="button"
-                              onClick={() => handleDeleteLead(lead.id)}
-                              className="text-stone-300 hover:text-rose-500 transition-colors cursor-pointer p-1"
-                              title="Удалить карточку"
+                              id={`delete-lead-btn-${lead.id}`}
+                              onClick={() => handleRequestDeleteLead(lead)}
+                              className="text-stone-400 hover:text-rose-600 hover:bg-rose-50 p-1.5 rounded-lg border border-transparent hover:border-rose-200 transition-all cursor-pointer flex-shrink-0"
+                              title="Удалить клиента из CRM"
                             >
-                              <Trash2 className="w-3.5 h-3.5" />
+                              <Trash2 className="w-4 h-4" />
                             </button>
                           </div>
 
@@ -739,19 +1066,150 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 />
               </div>
 
-              <div>
-                <label className="block text-xs font-bold text-stone-700 uppercase tracking-wider mb-1">
-                  Аренда в месяц ($ USD) *
-                </label>
-                <input
-                  type="number"
-                  value={formPriceUsd}
-                  onChange={(e) => setFormPriceUsd(Number(e.target.value))}
-                  min={100}
-                  max={10000}
-                  required
-                  className="w-full bg-stone-50 border border-stone-200 rounded-2xl px-4 py-2.5 text-xs text-stone-900 focus:outline-none focus:ring-2 focus:ring-rose-500"
-                />
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="block text-xs font-bold text-stone-700 uppercase tracking-wider">
+                    Стоимость аренды в месяц *
+                  </label>
+                  <span className="text-[11px] text-stone-400">
+                    Курс: 1 $ ≈ 2.72 ₾
+                  </span>
+                </div>
+
+                <div className="flex rounded-2xl border border-stone-200 bg-stone-50 overflow-hidden focus-within:ring-2 focus-within:ring-rose-500 focus-within:border-transparent transition-all">
+                  {/* Currency selector toggle: USD or GEL */}
+                  <div className="flex p-1 bg-stone-200/70 border-r border-stone-200 gap-1 items-center flex-shrink-0">
+                    <button
+                      type="button"
+                      id="form-currency-usd-btn"
+                      onClick={() => handleFormCurrencyChange('USD')}
+                      className={`px-2.5 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-1 ${
+                        formCurrency === 'USD'
+                          ? 'bg-rose-500 text-white shadow-xs'
+                          : 'text-stone-700 hover:text-stone-900 hover:bg-stone-100'
+                      }`}
+                      title="Выбрать доллары США"
+                    >
+                      <span>$ USD</span>
+                      <span className="text-[10px] font-normal opacity-90 hidden sm:inline">(Доллары)</span>
+                    </button>
+                    <button
+                      type="button"
+                      id="form-currency-gel-btn"
+                      onClick={() => handleFormCurrencyChange('GEL')}
+                      className={`px-2.5 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-1 ${
+                        formCurrency === 'GEL'
+                          ? 'bg-rose-500 text-white shadow-xs'
+                          : 'text-stone-700 hover:text-stone-900 hover:bg-stone-100'
+                      }`}
+                      title="Выбрать грузинские лари"
+                    >
+                      <span>₾ GEL</span>
+                      <span className="text-[10px] font-normal opacity-90 hidden sm:inline">(Лари)</span>
+                    </button>
+                  </div>
+
+                  {/* Input field */}
+                  <div className="relative flex-1 flex items-center">
+                    <span className="pl-3.5 pr-1 text-sm font-bold text-stone-400 select-none">
+                      {formCurrency === 'USD' ? '$' : '₾'}
+                    </span>
+                    <input
+                      type="number"
+                      id="form-price-input"
+                      value={formPriceAmount || ''}
+                      onChange={(e) => setFormPriceAmount(Math.max(0, Number(e.target.value)))}
+                      min={formCurrency === 'USD' ? 50 : 150}
+                      max={formCurrency === 'USD' ? 20000 : 60000}
+                      required
+                      placeholder={formCurrency === 'USD' ? '750' : '2000'}
+                      className="w-full bg-transparent py-2.5 pr-4 text-xs font-bold text-stone-900 focus:outline-none"
+                    />
+                    <span className="pr-3 text-[11px] font-semibold text-stone-400 select-none flex-shrink-0">
+                      / месяц
+                    </span>
+                  </div>
+                </div>
+
+                {/* Conversion helper banner & presets */}
+                <div className="flex flex-wrap items-center justify-between gap-1.5 text-[11px] px-1 pt-0.5">
+                  <div className="flex items-center gap-1.5 text-stone-600 font-medium">
+                    <span className="text-stone-400">Эквивалент:</span>
+                    <span className="font-bold text-rose-600 bg-rose-50 px-2 py-0.5 rounded-lg border border-rose-100">
+                      {formCurrency === 'USD'
+                        ? `≈ ${Math.round(formPriceAmount * 2.72).toLocaleString('ru-RU')} ₾ (Лари)`
+                        : `≈ $${Math.round(formPriceAmount / 2.72).toLocaleString('ru-RU')} USD (Доллары)`
+                      }
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-1">
+                    <span className="text-[10px] text-stone-400 mr-0.5">Быстро:</span>
+                    {formCurrency === 'USD' ? (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => setFormPriceAmount(500)}
+                          className="px-1.5 py-0.5 rounded-md bg-stone-100 hover:bg-stone-200 text-stone-600 text-[10px] font-semibold cursor-pointer transition"
+                        >
+                          $500
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setFormPriceAmount(750)}
+                          className="px-1.5 py-0.5 rounded-md bg-stone-100 hover:bg-stone-200 text-stone-600 text-[10px] font-semibold cursor-pointer transition"
+                        >
+                          $750
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setFormPriceAmount(1000)}
+                          className="px-1.5 py-0.5 rounded-md bg-stone-100 hover:bg-stone-200 text-stone-600 text-[10px] font-semibold cursor-pointer transition"
+                        >
+                          $1000
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setFormPriceAmount(1400)}
+                          className="px-1.5 py-0.5 rounded-md bg-stone-100 hover:bg-stone-200 text-stone-600 text-[10px] font-semibold cursor-pointer transition"
+                        >
+                          $1400
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => setFormPriceAmount(1400)}
+                          className="px-1.5 py-0.5 rounded-md bg-stone-100 hover:bg-stone-200 text-stone-600 text-[10px] font-semibold cursor-pointer transition"
+                        >
+                          1400 ₾
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setFormPriceAmount(2000)}
+                          className="px-1.5 py-0.5 rounded-md bg-stone-100 hover:bg-stone-200 text-stone-600 text-[10px] font-semibold cursor-pointer transition"
+                        >
+                          2000 ₾
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setFormPriceAmount(2700)}
+                          className="px-1.5 py-0.5 rounded-md bg-stone-100 hover:bg-stone-200 text-stone-600 text-[10px] font-semibold cursor-pointer transition"
+                        >
+                          2700 ₾
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setFormPriceAmount(4000)}
+                          className="px-1.5 py-0.5 rounded-md bg-stone-100 hover:bg-stone-200 text-stone-600 text-[10px] font-semibold cursor-pointer transition"
+                        >
+                          4000 ₾
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
               </div>
 
               <div>
@@ -828,17 +1286,110 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 </div>
               </div>
 
-              <div className="sm:col-span-2">
-                <label className="block text-xs font-bold text-stone-700 uppercase tracking-wider mb-1">
-                  Ссылка на фото квартиры
-                </label>
-                <input
-                  type="url"
-                  value={formImageUrl}
-                  onChange={(e) => setFormImageUrl(e.target.value)}
-                  placeholder="https://images.unsplash.com/..."
-                  className="w-full bg-stone-50 border border-stone-200 rounded-2xl px-4 py-2 text-xs text-stone-900"
-                />
+              <div className="sm:col-span-2 space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div>
+                    <label className="block text-xs font-bold text-stone-700 uppercase tracking-wider">
+                      Фотографии объекта ({formImages.length})
+                    </label>
+                    <p className="text-[11px] text-stone-500">
+                      Загрузите фото архивом ZIP (все фото распакуются по отдельности) или добавьте ссылки
+                    </p>
+                  </div>
+
+                  <label className="inline-flex items-center gap-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer self-start sm:self-auto">
+                    <Archive className="w-4 h-4 text-rose-500" />
+                    <span>Загрузить ZIP-архив с фото</span>
+                    <input
+                      type="file"
+                      accept=".zip,application/zip,application/x-zip-compressed"
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) handleUploadFormZip(file);
+                      }}
+                    />
+                  </label>
+                </div>
+
+                {/* ZIP Extraction Notice */}
+                {formZipNotice && (
+                  <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs flex items-center gap-2">
+                    {isFormZipExtracting ? (
+                      <Clock className="w-4 h-4 text-amber-600 animate-spin flex-shrink-0" />
+                    ) : (
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+                    )}
+                    <span>{formZipNotice}</span>
+                  </div>
+                )}
+
+                {/* Photos thumbnails grid */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                  {formImages.map((imgUrl, idx) => (
+                    <div key={idx} className="relative rounded-xl overflow-hidden aspect-4/3 bg-stone-900 border border-stone-200 group shadow-2xs">
+                      <img
+                        src={imgUrl}
+                        alt={`Фото ${idx + 1}`}
+                        className="w-full h-full object-cover"
+                      />
+                      <div className="absolute top-1 left-1 bg-stone-950/70 text-white text-[9px] font-bold px-1.5 py-0.5 rounded">
+                        {idx === 0 ? '★ Обложка' : `#${idx + 1}`}
+                      </div>
+                      <div className="absolute inset-0 bg-stone-950/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1">
+                        {idx !== 0 && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const updated = [...formImages];
+                              const [moved] = updated.splice(idx, 1);
+                              updated.unshift(moved);
+                              setFormImages(updated);
+                            }}
+                            className="bg-white/90 hover:bg-white text-stone-900 text-[10px] font-bold px-1.5 py-1 rounded shadow cursor-pointer"
+                            title="Сделать обложкой"
+                          >
+                            Обложка
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const updated = formImages.filter((_, i) => i !== idx);
+                            setFormImages(updated);
+                          }}
+                          className="bg-rose-600 hover:bg-rose-700 text-white p-1 rounded cursor-pointer"
+                          title="Удалить фото"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Add photo by URL */}
+                <div className="flex gap-2">
+                  <input
+                    type="url"
+                    value={formNewImageUrl}
+                    onChange={(e) => setFormNewImageUrl(e.target.value)}
+                    placeholder="Или вставьте ссылку на ещё одно фото (Unsplash / CDN)..."
+                    className="flex-1 bg-stone-50 border border-stone-200 rounded-xl px-3 py-2 text-xs text-stone-900"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (formNewImageUrl.trim()) {
+                        setFormImages((prev) => [...prev, formNewImageUrl.trim()]);
+                        setFormNewImageUrl('');
+                      }
+                    }}
+                    className="bg-stone-200 hover:bg-stone-300 text-stone-800 font-bold px-3 py-2 rounded-xl text-xs cursor-pointer transition-colors"
+                  >
+                    Добавить
+                  </button>
+                </div>
               </div>
 
               <div className="sm:col-span-2">
@@ -867,121 +1418,334 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         </div>
       )}
 
-      {/* SECTION 3: PROPERTY UPLOAD VIA PDF FILE */}
+      {/* SECTION 3: PROPERTY UPLOAD VIA ZIP ARCHIVE OR PDF FILE */}
       {adminTab === 'upload_pdf' && (
-        <div className="bg-white rounded-3xl p-6 sm:p-8 border border-stone-200 shadow-sm max-w-3xl mx-auto space-y-6">
+        <div className="bg-white rounded-3xl p-6 sm:p-8 border border-stone-200 shadow-sm max-w-4xl mx-auto space-y-6">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center">
-              <FileText className="w-5 h-5" />
+            <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-rose-500 via-rose-600 to-amber-500 text-white flex items-center justify-center shadow-xs">
+              <Archive className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="text-lg font-black text-stone-900">Загрузка объекта: Импорт из PDF-файла</h3>
+              <h3 className="text-lg font-black text-stone-900">Загрузка объекта: ZIP-архив с фото или PDF</h3>
               <p className="text-xs text-stone-500">
-                Загрузите презентацию или выписку по квартире в формате PDF. Система автоматически извлечёт характеристики объекта!
+                Загрузите архив с фотографиями (.zip) или презентацию (.pdf). Система распакует все фото по отдельности, прогрузит их в карточку объекта, извлечёт параметры и предложит клиентам в свайпах!
               </p>
             </div>
           </div>
 
+          {pdfError && (
+            <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 text-xs font-medium flex items-start gap-2.5">
+              <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
+              <span>{pdfError}</span>
+            </div>
+          )}
+
           {pdfSuccessMessage && (
-            <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold flex items-center gap-2">
-              <CheckCircle2 className="w-5 h-5 text-emerald-600 flex-shrink-0" />
+            <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs font-semibold flex items-center gap-2 animate-in fade-in">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
               <span>{pdfSuccessMessage}</span>
             </div>
           )}
 
-          {/* Drag and Drop Zone */}
-          <div className="border-2 border-dashed border-stone-300 hover:border-rose-500 rounded-3xl p-8 text-center transition-colors bg-stone-50/50">
-            <UploadCloud className="w-12 h-12 text-stone-400 mx-auto mb-3" />
-            <h4 className="font-bold text-sm text-stone-800">Перетащите PDF-файл сюда</h4>
-            <p className="text-xs text-stone-500 mt-1">Поддерживаются презентации объектов недвижимости в Тбилиси до 25 МБ</p>
+          {/* Success State & Apartment Preview */}
+          {pdfSuccessApartment && (
+            <div className="p-6 rounded-3xl bg-emerald-50/90 border border-emerald-200 space-y-4 animate-in fade-in">
+              <div className="flex items-start gap-3">
+                <div className="w-8 h-8 rounded-full bg-emerald-600 text-white flex items-center justify-center flex-shrink-0 mt-0.5">
+                  <CheckCircle2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-black text-emerald-900">Объект успешно опубликован в Rentch!</h4>
+                  <p className="text-xs text-emerald-700 mt-0.5">
+                    Карточка с {pdfSuccessApartment.images.length} отдельными фотографиями, ценой и описанием размещена в общей базе и сразу доступна клиентам для свайпов и записи на просмотр.
+                  </p>
+                </div>
+              </div>
 
-            <div className="mt-4 flex flex-wrap justify-center gap-2">
-              <label className="bg-white border border-stone-200 hover:border-stone-300 text-stone-800 font-semibold px-4 py-2 rounded-xl text-xs shadow-2xs cursor-pointer transition-colors inline-block">
-                <span>Выбрать файл с диска</span>
+              {/* Apartment Preview Card */}
+              <div className="bg-white rounded-2xl p-4 border border-emerald-200 shadow-xs flex flex-col sm:flex-row gap-4 items-start">
+                <div className="w-full sm:w-48 h-36 rounded-xl overflow-hidden bg-stone-900 flex-shrink-0 relative">
+                  <img
+                    src={pdfSuccessApartment.images[0]}
+                    alt={pdfSuccessApartment.title}
+                    className="w-full h-full object-cover"
+                  />
+                  <div className="absolute top-2 left-2 bg-stone-950/70 backdrop-blur-xs text-white text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1">
+                    <ImageIcon className="w-3 h-3 text-rose-400" />
+                    <span>{pdfSuccessApartment.images.length} фото</span>
+                  </div>
+                  <div className="absolute bottom-2 left-2 bg-rose-600 text-white text-xs font-black px-2 py-0.5 rounded-lg">
+                    ${pdfSuccessApartment.priceUsd} / мес
+                  </div>
+                </div>
+
+                <div className="flex-1 min-w-0 space-y-1.5">
+                  <div className="text-[11px] font-bold text-rose-600 uppercase tracking-wider">
+                    {pdfSuccessApartment.district}
+                  </div>
+                  <h5 className="font-bold text-sm text-stone-900 leading-snug">
+                    {pdfSuccessApartment.title}
+                  </h5>
+                  <div className="flex flex-wrap gap-2 text-xs text-stone-600">
+                    <span className="font-semibold">{pdfSuccessApartment.rooms}-комн.</span>
+                    <span>•</span>
+                    <span>{pdfSuccessApartment.areaSqm} м²</span>
+                    <span>•</span>
+                    <span className="truncate">{pdfSuccessApartment.address}</span>
+                  </div>
+                  <p className="text-xs text-stone-500 line-clamp-2 leading-relaxed">
+                    {pdfSuccessApartment.description}
+                  </p>
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex flex-wrap gap-2.5 pt-1">
+                {onSwitchToSwipe && (
+                  <button
+                    type="button"
+                    id="view-client-swipes-btn"
+                    onClick={() => {
+                      onSwitchToSwipe();
+                      onClose();
+                    }}
+                    className="bg-rose-500 hover:bg-rose-600 text-white font-bold px-4 py-2.5 rounded-xl text-xs shadow-xs transition-all flex items-center gap-2 cursor-pointer"
+                  >
+                    <Eye className="w-4 h-4" />
+                    <span>Посмотреть в свайпах (как видит клиент)</span>
+                  </button>
+                )}
+
+                {onViewApartment && (
+                  <button
+                    type="button"
+                    id="view-apartment-modal-btn"
+                    onClick={() => {
+                      onViewApartment(pdfSuccessApartment);
+                    }}
+                    className="bg-white hover:bg-stone-50 text-stone-800 border border-stone-300 font-bold px-4 py-2.5 rounded-xl text-xs transition-all flex items-center gap-2 cursor-pointer"
+                  >
+                    <ExternalLink className="w-4 h-4 text-stone-500" />
+                    <span>Открыть подробную карточку</span>
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPdfSuccessApartment(null);
+                    setPdfExtractedData(null);
+                    setSelectedUploadFile(null);
+                    setPdfSuccessMessage('');
+                  }}
+                  className="bg-emerald-100 hover:bg-emerald-200 text-emerald-800 font-bold px-4 py-2.5 rounded-xl text-xs transition-all cursor-pointer"
+                >
+                  Загрузить ещё объект
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Drag and Drop Zone for ZIP & PDF */}
+          <div
+            onDragOver={(e) => {
+              e.preventDefault();
+              setIsDraggingPdf(true);
+            }}
+            onDragLeave={(e) => {
+              e.preventDefault();
+              setIsDraggingPdf(false);
+            }}
+            onDrop={(e) => {
+              e.preventDefault();
+              setIsDraggingPdf(false);
+              const file = e.dataTransfer.files?.[0];
+              if (file) {
+                handleProcessArchiveOrPdfFile(file);
+              }
+            }}
+            className={`border-2 border-dashed rounded-3xl p-8 text-center transition-all ${
+              isDraggingPdf 
+                ? 'border-rose-500 bg-rose-50/60 scale-[1.01]' 
+                : 'border-stone-300 hover:border-rose-400 bg-stone-50/50'
+            }`}
+          >
+            <div className="flex justify-center items-center gap-2 mb-3">
+              <Archive className={`w-10 h-10 transition-colors ${isDraggingPdf ? 'text-rose-500' : 'text-amber-500'}`} />
+              <FileText className={`w-10 h-10 transition-colors ${isDraggingPdf ? 'text-rose-500' : 'text-rose-400'}`} />
+            </div>
+            <h4 className="font-bold text-sm text-stone-800">
+              {isDraggingPdf ? 'Отпустите архив или PDF для загрузки' : 'Перетащите ZIP-архив с фото или PDF-презентацию сюда'}
+            </h4>
+            <p className="text-xs text-stone-500 mt-1 max-w-md mx-auto">
+              Поддерживаются ZIP-архивы с фото комнат (.zip) и PDF-презентации (.pdf). Система автоматически распакует все фотографии по отдельности!
+            </p>
+
+            <div className="mt-5 flex flex-wrap justify-center gap-3">
+              <label className="bg-rose-500 hover:bg-rose-600 text-white font-bold px-5 py-2.5 rounded-xl text-xs shadow-xs cursor-pointer transition-colors inline-flex items-center gap-2">
+                <Archive className="w-4 h-4" />
+                <span>Выбрать ZIP-архив с фото (.zip)</span>
                 <input
                   type="file"
-                  accept=".pdf"
+                  accept=".zip,application/zip,application/x-zip-compressed"
                   className="hidden"
                   onChange={(e) => {
                     const file = e.target.files?.[0];
-                    if (file) {
-                      setSelectedPdfFile(file);
-                      handleSimulatePdfUpload(file.name, {
-                        title: 'Современные апартаменты в ЖК Axis Towers',
-                        district: 'Ваке (Vake)',
-                        address: 'пр. Чавчавадзе, 37М',
-                        priceUsd: 1250,
-                        rooms: 3,
-                        areaSqm: 85,
-                        furniture: 'full',
-                        petPolicy: 'allowed',
-                        description: 'Эксклюзивная квартира с консьерж-сервисом, бассейном в комплексе и панорамным видом на Тбилиси.',
-                        extractedFile: file.name,
-                      });
-                    }
+                    if (file) handleProcessArchiveOrPdfFile(file);
+                  }}
+                />
+              </label>
+
+              <label className="bg-stone-900 hover:bg-black text-white font-bold px-5 py-2.5 rounded-xl text-xs shadow-xs cursor-pointer transition-colors inline-flex items-center gap-2">
+                <FileText className="w-4 h-4" />
+                <span>Выбрать PDF-файл (.pdf)</span>
+                <input
+                  type="file"
+                  accept=".pdf,application/pdf"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) handleProcessArchiveOrPdfFile(file);
                   }}
                 />
               </label>
             </div>
           </div>
 
-          {/* Preset Demo PDFs to test 1-click parsing */}
-          <div className="space-y-2">
-            <div className="text-xs font-bold text-stone-500 uppercase tracking-wider">
-              Или протестируйте готовые образцы PDF-файлов:
+          {/* Preset Demo Archives & PDFs to test 1-click unpacking */}
+          <div className="space-y-2.5">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-stone-500 uppercase tracking-wider">
+                Или протестируйте готовые образцы ZIP-архивов и PDF:
+              </span>
+              <span className="text-[11px] text-stone-400">1 клик для теста</span>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <button
                 type="button"
                 onClick={() =>
-                  handleSimulatePdfUpload('Презентация_Квартира_Ваке_Аракишвили.pdf', {
-                    title: 'Дизайнерская 2-комнатная квартира на Аракишвили',
+                  handleSelectSamplePdf({
+                    title: 'Дизайнерский пентхаус на Аракишвили',
                     district: 'Ваке (Vake)',
                     address: 'ул. Аракишвили, 14',
                     priceUsd: 950,
                     rooms: 2,
+                    bedrooms: 1,
                     areaSqm: 68,
+                    floor: 5,
+                    totalFloors: 10,
                     furniture: 'full',
                     petPolicy: 'allowed',
-                    description: 'Новый дом премиум-класса, просторная кухня-гостиная, мастер-спальня, гардеробная и балкон в тихий двор.',
-                    extractedFile: 'Презентация_Квартира_Ваке_Аракишвили.pdf',
+                    description: 'Новый дом премиум-класса на Аракишвили в Ваке. Просторная кухня-гостиная с выходом на открытый балкон, мастер-спальня с гардеробной, дизайнерская мебель и вид в тихий зелёный двор.',
+                    amenities: ['Кондиционер', 'Стиральная машина', 'Посудомоечная машина', 'Wi-Fi', 'Центральное отопление', 'Балкон', 'Подземный паркинг'],
+                    images: [
+                      'https://images.unsplash.com/photo-1502672260266-1c1ef2d93688?auto=format&fit=crop&w=1200&q=80',
+                      'https://images.unsplash.com/photo-1560448204-e02f11c3d0e2?auto=format&fit=crop&w=1200&q=80',
+                      'https://images.unsplash.com/photo-1484154218962-a197022b5858?auto=format&fit=crop&w=1200&q=80',
+                      'https://images.unsplash.com/photo-1554995207-c18c20360250?auto=format&fit=crop&w=1200&q=80',
+                      'https://images.unsplash.com/photo-1522708323590-d24dbb6b0267?auto=format&fit=crop&w=1200&q=80',
+                      'https://images.unsplash.com/photo-1507089947368-19c1da9775ae?auto=format&fit=crop&w=1200&q=80',
+                    ],
+                    extractedFile: 'Фото_Ваке_Пентхаус_6_фото.zip',
+                    rawTextPreview: 'ZIP-АРХИВ: Фото_Ваке_Пентхаус_6_фото.zip\nИзвлечено фото: 6 шт. по отдельности\nФайлы в архиве:\n1. 1_гостиная_панорама.jpg\n2. 2_спальня_мастер.jpg\n3. 3_кухня_остров.jpg\n4. 4_ванная_комната.jpg\n5. 5_балкон_вид.jpg\n6. 6_прихожая_холл.jpg',
+                    sourceType: 'zip',
+                    zipFileNames: ['1_гостиная_панорама.jpg', '2_спальня_мастер.jpg', '3_кухня_остров.jpg', '4_ванная_комната.jpg', '5_балкон_вид.jpg', '6_прихожая_холл.jpg'],
                   })
                 }
-                className="p-3 rounded-2xl border border-stone-200 hover:border-rose-400 hover:bg-rose-50/40 text-left transition-all cursor-pointer flex items-center gap-3 group"
+                className="p-3.5 rounded-2xl border border-stone-200 hover:border-rose-400 hover:bg-rose-50/40 text-left transition-all cursor-pointer flex items-center gap-3 group"
               >
-                <FileText className="w-8 h-8 text-rose-500 flex-shrink-0" />
+                <div className="w-8 h-8 rounded-xl bg-rose-50 text-rose-500 flex items-center justify-center flex-shrink-0 group-hover:bg-rose-100">
+                  <Archive className="w-5 h-5" />
+                </div>
                 <div className="min-w-0">
                   <div className="text-xs font-bold text-stone-900 group-hover:text-rose-600 truncate">
-                    Презентация_Квартира_Ваке.pdf
+                    Фото_Ваке_Пентхаус.zip
                   </div>
-                  <div className="text-[11px] text-stone-500">68 м² • $950 • Ваке</div>
+                  <div className="text-[11px] text-stone-500">6 отдельных фото • Ваке</div>
                 </div>
               </button>
 
               <button
                 type="button"
                 onClick={() =>
-                  handleSimulatePdfUpload('Брошюра_Сабуртало_Казбеги_Панорама.pdf', {
+                  handleSelectSamplePdf({
                     title: 'Видовая студия с террасой на Казбеги',
                     district: 'Сабуртало (Saburtalo)',
                     address: 'пр. Казбеги, 24',
                     priceUsd: 700,
-                    rooms: 2,
+                    rooms: 1,
+                    bedrooms: 1,
                     areaSqm: 54,
+                    floor: 8,
+                    totalFloors: 14,
                     furniture: 'full',
                     petPolicy: 'cats_only',
-                    description: 'Свежий ремонт в стиле сканди, метро Делиси в 3 минутах, охраняемая территория.',
-                    extractedFile: 'Брошюра_Сабуртало_Казбеги_Панорама.pdf',
+                    description: 'Свежий скандинавский ремонт, станция метро Делиси в 3 минутах пешком. Охраняемая территория, большая терраса с панорамным видом на Тбилиси и горы.',
+                    amenities: ['Кондиционер', 'Стиральная машина', 'Wi-Fi', 'Центральное отопление', 'Панорамный вид', 'Балкон'],
+                    images: [
+                      'https://images.unsplash.com/photo-1522708323590-d24dbb6b0267?auto=format&fit=crop&w=1200&q=80',
+                      'https://images.unsplash.com/photo-1507089947368-19c1da9775ae?auto=format&fit=crop&w=1200&q=80',
+                      'https://images.unsplash.com/photo-1554995207-c18c20360250?auto=format&fit=crop&w=1200&q=80',
+                      'https://images.unsplash.com/photo-1560448204-e02f11c3d0e2?auto=format&fit=crop&w=1200&q=80',
+                      'https://images.unsplash.com/photo-1484154218962-a197022b5858?auto=format&fit=crop&w=1200&q=80',
+                    ],
+                    extractedFile: 'Фото_Сабуртало_Сканди_5_фото.zip',
+                    rawTextPreview: 'ZIP-АРХИВ: Фото_Сабуртало_Сканди_5_фото.zip\nИзвлечено фото: 5 шт. по отдельности\nФайлы в архиве:\n1. 1_зал_студия.jpg\n2. 2_спальная_зона.jpg\n3. 3_терраса_панорама.jpg\n4. 4_кухонный_гарнитур.jpg\n5. 5_санузел.jpg',
+                    sourceType: 'zip',
+                    zipFileNames: ['1_зал_студия.jpg', '2_спальная_зона.jpg', '3_терраса_панорама.jpg', '4_кухонный_гарнитур.jpg', '5_санузел.jpg'],
                   })
                 }
-                className="p-3 rounded-2xl border border-stone-200 hover:border-rose-400 hover:bg-rose-50/40 text-left transition-all cursor-pointer flex items-center gap-3 group"
+                className="p-3.5 rounded-2xl border border-stone-200 hover:border-amber-400 hover:bg-amber-50/40 text-left transition-all cursor-pointer flex items-center gap-3 group"
               >
-                <FileText className="w-8 h-8 text-amber-500 flex-shrink-0" />
+                <div className="w-8 h-8 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center flex-shrink-0 group-hover:bg-amber-100">
+                  <Archive className="w-5 h-5" />
+                </div>
                 <div className="min-w-0">
-                  <div className="text-xs font-bold text-stone-900 group-hover:text-rose-600 truncate">
-                    Брошюра_Сабуртало_Казбеги.pdf
+                  <div className="text-xs font-bold text-stone-900 group-hover:text-amber-600 truncate">
+                    Фото_Сабуртало_Сканди.zip
                   </div>
-                  <div className="text-[11px] text-stone-500">54 м² • $700 • Сабуртало</div>
+                  <div className="text-[11px] text-stone-500">5 отдельных фото • Сабуртало</div>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() =>
+                  handleSelectSamplePdf({
+                    title: 'Атмосферный пентхаус с камином на Мтацминде',
+                    district: 'Мтацминда (Mtatsminda)',
+                    address: 'ул. Чонкадзе, 18',
+                    priceUsd: 1400,
+                    rooms: 3,
+                    bedrooms: 2,
+                    areaSqm: 110,
+                    floor: 4,
+                    totalFloors: 4,
+                    furniture: 'full',
+                    petPolicy: 'allowed',
+                    description: 'Уникальный пентхаус в историческом сердце Тбилиси у подножия фуникулёра. Настоящий дровяной камин, просторная видовая терраса 25 м² с обзором на весь старый город и Нарикала.',
+                    amenities: ['Камин', 'Панорамный вид', 'Кондиционер', 'Стиральная машина', 'Посудомоечная машина', 'Wi-Fi', 'Паркинг'],
+                    images: [
+                      'https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&w=1200&q=80',
+                      'https://images.unsplash.com/photo-1600566753190-17f0baa2a6c3?auto=format&fit=crop&w=1200&q=80',
+                      'https://images.unsplash.com/photo-1600607687939-ce8a6c25118c?auto=format&fit=crop&w=1200&q=80',
+                    ],
+                    extractedFile: 'Презентация_Мтацминда.pdf',
+                    rawTextPreview: 'ЭКСКЛЮЗИВНОЕ ПРЕДЛОЖЕНИЕ\nТбилиси, Мтацминда, ул. Чонкадзе 18\nПентхаус 110 кв.м, 3 комнаты, 2 спальни, каминный зал\nАренда: 1400 USD / мес. Разрешено проживание с питомцами.',
+                    sourceType: 'pdf',
+                  })
+                }
+                className="p-3.5 rounded-2xl border border-stone-200 hover:border-purple-400 hover:bg-purple-50/40 text-left transition-all cursor-pointer flex items-center gap-3 group"
+              >
+                <div className="w-8 h-8 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center flex-shrink-0 group-hover:bg-purple-100">
+                  <FileText className="w-5 h-5" />
+                </div>
+                <div className="min-w-0">
+                  <div className="text-xs font-bold text-stone-900 group-hover:text-purple-600 truncate">
+                    Презентация_Мтацминда.pdf
+                  </div>
+                  <div className="text-[11px] text-stone-500">110 м² • $1400 • Мтацминда</div>
                 </div>
               </button>
             </div>
@@ -989,49 +1753,342 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
           {/* Loading Indicator */}
           {isPdfProcessing && (
-            <div className="p-6 rounded-2xl bg-stone-100 text-center space-y-2 animate-pulse">
-              <Clock className="w-6 h-6 text-rose-500 mx-auto animate-spin" />
-              <div className="text-xs font-bold text-stone-800">Идёт распознавание и парсинг PDF-файла...</div>
-              <p className="text-[11px] text-stone-500">Извлекаем характеристики объекта, адрес, стоимость и условия аренды</p>
+            <div className="p-8 rounded-3xl bg-stone-50 border border-stone-200 text-center space-y-3">
+              <div className="w-12 h-12 rounded-full bg-rose-50 text-rose-500 flex items-center justify-center mx-auto">
+                <Clock className="w-6 h-6 animate-spin" />
+              </div>
+              <div className="text-sm font-bold text-stone-800">
+                {pdfProcessingStep || 'Обработка и распаковка файла...'}
+              </div>
+              <p className="text-xs text-stone-500 max-w-md mx-auto">
+                Система распаковывает архив, извлекает все фотографии по отдельности, распознаёт параметры и формирует карточку объекта для клиентов.
+              </p>
             </div>
           )}
 
-          {/* Extracted Metadata Card */}
+          {/* Extracted Metadata Card & Individual Photos Gallery */}
           {pdfExtractedData && !isPdfProcessing && (
-            <div className="bg-stone-50 rounded-2xl p-5 border border-stone-200 space-y-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
+            <div className="bg-stone-50/70 rounded-3xl p-6 border border-stone-200 space-y-6">
+              <div className="flex items-center justify-between pb-3 border-b border-stone-200">
+                <div className="flex items-center gap-2.5">
                   <FileCheck className="w-5 h-5 text-emerald-600" />
-                  <h4 className="font-bold text-sm text-stone-900">Данные успешно извлечены из PDF:</h4>
+                  <div>
+                    <h4 className="font-black text-sm text-stone-900">
+                      {pdfExtractedData.sourceType === 'zip' ? '📦 Извлечено из ZIP-архива' : '📄 Извлечено из PDF-файла'}: {pdfExtractedData.extractedFile}
+                    </h4>
+                    <p className="text-[11px] text-stone-500">
+                      Все фотографии по отдельности прогружены в карточку. Проверьте или скорректируйте данные перед публикацией клиентам
+                    </p>
+                  </div>
                 </div>
-                <span className="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded-full">
-                  100% готов к импорту
+                <span className="text-[11px] bg-emerald-100 text-emerald-800 font-bold px-2.5 py-1 rounded-full flex items-center gap-1">
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  <span>{pdfExtractedData.images.length} фото готово</span>
                 </span>
               </div>
 
-              <div className="grid grid-cols-2 gap-3 text-xs bg-white p-3.5 rounded-xl border border-stone-200">
-                <div><strong>Название:</strong> {pdfExtractedData.title}</div>
-                <div><strong>Район:</strong> {pdfExtractedData.district}</div>
-                <div><strong>Адрес:</strong> {pdfExtractedData.address}</div>
-                <div><strong>Цена:</strong> <span className="text-rose-600 font-bold">${pdfExtractedData.priceUsd}/мес</span></div>
-                <div><strong>Комнат:</strong> {pdfExtractedData.rooms}</div>
-                <div><strong>Площадь:</strong> {pdfExtractedData.areaSqm} м²</div>
-                <div><strong>Мебель:</strong> {pdfExtractedData.furniture === 'full' ? 'С мебелью' : 'Без мебели'}</div>
-                <div><strong>Питомцы:</strong> {pdfExtractedData.petPolicy === 'allowed' ? 'Разрешены' : 'Только кошки'}</div>
+              {/* Extracted Individual Photos Gallery */}
+              <div className="space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div>
+                    <label className="text-xs font-bold text-stone-700 uppercase tracking-wider flex items-center gap-1.5">
+                      <ImageIcon className="w-4 h-4 text-rose-500" />
+                      <span>Фотографии объекта по отдельности ({pdfExtractedData.images.length})</span>
+                    </label>
+                    <p className="text-[11px] text-stone-400">
+                      Первое фото — обложка карточки. Клиенты смогут листать все эти фото в карусели свайпа.
+                    </p>
+                  </div>
+
+                  {/* Add more photos from ZIP button */}
+                  <label className="inline-flex items-center gap-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer self-start sm:self-auto">
+                    <Archive className="w-3.5 h-3.5 text-rose-500" />
+                    <span>Добавить фото из другого ZIP-архива</span>
+                    <input
+                      type="file"
+                      accept=".zip,application/zip,application/x-zip-compressed"
+                      className="hidden"
+                      onChange={async (e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          try {
+                            const res = await parseZipArchive(file);
+                            if (res.imageUrls.length > 0) {
+                              setPdfExtractedData({
+                                ...pdfExtractedData,
+                                images: [...pdfExtractedData.images, ...res.imageUrls],
+                                zipFileNames: [...(pdfExtractedData.zipFileNames || []), ...res.images.map((img) => img.name)],
+                              });
+                            }
+                          } catch (err) {
+                            console.error(err);
+                          }
+                        }
+                      }}
+                    />
+                  </label>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+                  {pdfExtractedData.images.map((imgUrl, idx) => {
+                    const fileName = pdfExtractedData.zipFileNames?.[idx];
+                    return (
+                      <div key={idx} className="relative rounded-2xl overflow-hidden aspect-4/3 bg-stone-900 border border-stone-200 group shadow-2xs">
+                        <img
+                          src={imgUrl}
+                          alt={`Фото ${idx + 1}`}
+                          className="w-full h-full object-cover"
+                        />
+                        {/* Photo index / cover badge */}
+                        <div className="absolute top-1.5 left-1.5 bg-stone-950/75 backdrop-blur-xs text-white text-[10px] font-bold px-2 py-0.5 rounded-md flex items-center gap-1">
+                          {idx === 0 ? (
+                            <span className="text-amber-400 font-black">★ Обложка</span>
+                          ) : (
+                            <span>#{idx + 1}</span>
+                          )}
+                        </div>
+
+                        {/* Filename caption if extracted from zip */}
+                        {fileName && (
+                          <div className="absolute bottom-0 inset-x-0 bg-stone-950/80 backdrop-blur-xs text-stone-200 text-[9px] px-2 py-1 truncate">
+                            {fileName}
+                          </div>
+                        )}
+
+                        {/* Hover action overlay */}
+                        <div className="absolute inset-0 bg-stone-950/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1.5 p-2">
+                          {idx !== 0 && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const updated = [...pdfExtractedData.images];
+                                const [moved] = updated.splice(idx, 1);
+                                updated.unshift(moved);
+                                const updatedNames = pdfExtractedData.zipFileNames ? [...pdfExtractedData.zipFileNames] : undefined;
+                                if (updatedNames) {
+                                  const [movedName] = updatedNames.splice(idx, 1);
+                                  updatedNames.unshift(movedName);
+                                }
+                                setPdfExtractedData({
+                                  ...pdfExtractedData,
+                                  images: updated,
+                                  zipFileNames: updatedNames,
+                                });
+                              }}
+                              className="bg-white/95 hover:bg-white text-stone-900 text-[10px] font-bold px-2 py-1 rounded-md shadow cursor-pointer transition"
+                              title="Сделать главной обложкой карточки"
+                            >
+                              Сделать обложкой
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const updated = [...pdfExtractedData.images];
+                              updated.splice(idx, 1);
+                              const updatedNames = pdfExtractedData.zipFileNames ? [...pdfExtractedData.zipFileNames] : undefined;
+                              if (updatedNames) {
+                                updatedNames.splice(idx, 1);
+                              }
+                              setPdfExtractedData({
+                                ...pdfExtractedData,
+                                images: updated.length > 0 ? updated : ['https://images.unsplash.com/photo-1502672260266-1c1ef2d93688?auto=format&fit=crop&w=1200&q=80'],
+                                zipFileNames: updatedNames,
+                              });
+                            }}
+                            className="bg-rose-600 hover:bg-rose-700 text-white p-1.5 rounded-md cursor-pointer transition"
+                            title="Удалить это фото"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Add photo by URL */}
+                <div className="flex gap-2 pt-1">
+                  <input
+                    type="url"
+                    placeholder="Добавить ещё ссылку на фото (Unsplash, CDN)..."
+                    value={newPhotoUrlInput}
+                    onChange={(e) => setNewPhotoUrlInput(e.target.value)}
+                    className="flex-1 bg-white border border-stone-200 rounded-xl px-3 py-1.5 text-xs text-stone-900"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (newPhotoUrlInput.trim()) {
+                        setPdfExtractedData({
+                          ...pdfExtractedData,
+                          images: [...pdfExtractedData.images, newPhotoUrlInput.trim()]
+                        });
+                        setNewPhotoUrlInput('');
+                      }
+                    }}
+                    className="bg-stone-200 hover:bg-stone-300 text-stone-800 font-bold px-3 py-1.5 rounded-xl text-xs cursor-pointer transition-colors"
+                  >
+                    Добавить фото
+                  </button>
+                </div>
               </div>
 
-              <p className="text-xs text-stone-600 italic">
-                "{pdfExtractedData.description}"
-              </p>
+              {/* Form fields for extracted details */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+                <div>
+                  <label className="block font-bold text-stone-700 uppercase tracking-wider mb-1">
+                    Название объекта
+                  </label>
+                  <input
+                    type="text"
+                    value={pdfExtractedData.title}
+                    onChange={(e) => setPdfExtractedData({ ...pdfExtractedData, title: e.target.value })}
+                    className="w-full bg-white border border-stone-200 rounded-xl px-3.5 py-2 font-medium text-stone-900"
+                  />
+                </div>
 
+                <div>
+                  <label className="block font-bold text-stone-700 uppercase tracking-wider mb-1">
+                    Стоимость ($ / месяц)
+                  </label>
+                  <div className="relative">
+                    <DollarSign className="w-4 h-4 text-rose-500 absolute left-3 top-2.5" />
+                    <input
+                      type="number"
+                      value={pdfExtractedData.priceUsd}
+                      onChange={(e) => setPdfExtractedData({ ...pdfExtractedData, priceUsd: Number(e.target.value) || 0 })}
+                      className="w-full bg-white border border-stone-200 rounded-xl pl-8 pr-3 py-2 font-bold text-rose-600 text-sm"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block font-bold text-stone-700 uppercase tracking-wider mb-1">
+                    Район Тбилиси
+                  </label>
+                  <select
+                    value={pdfExtractedData.district}
+                    onChange={(e) => setPdfExtractedData({ ...pdfExtractedData, district: e.target.value as TbilisiDistrict })}
+                    className="w-full bg-white border border-stone-200 rounded-xl px-3.5 py-2 font-medium text-stone-900"
+                  >
+                    {TBILISI_DISTRICTS.map((d) => (
+                      <option key={d} value={d}>{d}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block font-bold text-stone-700 uppercase tracking-wider mb-1">
+                    Точный адрес
+                  </label>
+                  <input
+                    type="text"
+                    value={pdfExtractedData.address}
+                    onChange={(e) => setPdfExtractedData({ ...pdfExtractedData, address: e.target.value })}
+                    className="w-full bg-white border border-stone-200 rounded-xl px-3.5 py-2 font-medium text-stone-900"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block font-bold text-stone-700 uppercase tracking-wider mb-1">
+                      Комнат
+                    </label>
+                    <input
+                      type="number"
+                      value={pdfExtractedData.rooms}
+                      onChange={(e) => setPdfExtractedData({ ...pdfExtractedData, rooms: Number(e.target.value) || 1 })}
+                      className="w-full bg-white border border-stone-200 rounded-xl px-3 py-2 text-stone-900"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-bold text-stone-700 uppercase tracking-wider mb-1">
+                      Площадь (м²)
+                    </label>
+                    <input
+                      type="number"
+                      value={pdfExtractedData.areaSqm}
+                      onChange={(e) => setPdfExtractedData({ ...pdfExtractedData, areaSqm: Number(e.target.value) || 20 })}
+                      className="w-full bg-white border border-stone-200 rounded-xl px-3 py-2 text-stone-900"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block font-bold text-stone-700 uppercase tracking-wider mb-1">
+                      Мебель
+                    </label>
+                    <select
+                      value={pdfExtractedData.furniture}
+                      onChange={(e) => setPdfExtractedData({ ...pdfExtractedData, furniture: e.target.value as FurnitureStatus })}
+                      className="w-full bg-white border border-stone-200 rounded-xl px-2.5 py-2 text-stone-900"
+                    >
+                      <option value="full">С мебелью</option>
+                      <option value="partial">Частично</option>
+                      <option value="none">Без мебели</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block font-bold text-stone-700 uppercase tracking-wider mb-1">
+                      Питомцы
+                    </label>
+                    <select
+                      value={pdfExtractedData.petPolicy}
+                      onChange={(e) => setPdfExtractedData({ ...pdfExtractedData, petPolicy: e.target.value as PetPolicy })}
+                      className="w-full bg-white border border-stone-200 rounded-xl px-2.5 py-2 text-stone-900"
+                    >
+                      <option value="allowed">Разрешены</option>
+                      <option value="cats_only">Только кошки</option>
+                      <option value="dogs_only">Только собаки</option>
+                      <option value="no_pets">Без животных</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="sm:col-span-2">
+                  <label className="block font-bold text-stone-700 uppercase tracking-wider mb-1">
+                    Описание объекта для клиентов (извлечено из PDF)
+                  </label>
+                  <textarea
+                    rows={4}
+                    value={pdfExtractedData.description}
+                    onChange={(e) => setPdfExtractedData({ ...pdfExtractedData, description: e.target.value })}
+                    className="w-full bg-white border border-stone-200 rounded-xl p-3 text-stone-900 leading-relaxed focus:outline-none focus:ring-2 focus:ring-rose-500"
+                    placeholder="Описание преимуществ, ремонта, техники и инфраструктуры..."
+                  />
+                </div>
+              </div>
+
+              {/* Raw Extracted Text Viewer Toggle */}
+              {pdfExtractedData.rawTextPreview && (
+                <div className="border-t border-stone-200 pt-3">
+                  <button
+                    type="button"
+                    onClick={() => setShowRawText(!showRawText)}
+                    className="text-[11px] font-semibold text-stone-500 hover:text-stone-800 flex items-center gap-1 cursor-pointer"
+                  >
+                    <span>{showRawText ? 'Скрыть исходный текст из PDF' : 'Показать распознанный исходный текст из PDF'}</span>
+                    <ChevronRightIcon className={`w-3.5 h-3.5 transition-transform ${showRawText ? 'rotate-90' : ''}`} />
+                  </button>
+                  {showRawText && (
+                    <pre className="mt-2 p-3 bg-white rounded-xl border border-stone-200 text-[10px] text-stone-600 overflow-x-auto whitespace-pre-wrap max-h-40 font-mono">
+                      {pdfExtractedData.rawTextPreview}
+                    </pre>
+                  )}
+                </div>
+              )}
+
+              {/* Submit CTA */}
               <button
                 type="button"
                 id="import-pdf-to-rentch-btn"
                 onClick={handleImportPdfApartment}
-                className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 px-5 rounded-2xl text-xs shadow-md transition-all cursor-pointer flex items-center justify-center gap-2"
+                className="w-full bg-gradient-to-r from-rose-500 via-rose-600 to-amber-500 hover:from-rose-600 hover:to-amber-600 text-white font-bold py-4 px-6 rounded-2xl text-sm shadow-md transition-all cursor-pointer flex items-center justify-center gap-2"
               >
-                <Sparkles className="w-4 h-4" />
-                <span>Импортировать объект в базу Rentch</span>
+                <Sparkles className="w-5 h-5" />
+                <span>Разместить в карточки и предложить клиентам</span>
               </button>
             </div>
           )}
@@ -1046,42 +2103,117 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               <h3 className="text-lg font-black text-stone-900">Каталог объектов в сервисе ({apartments.length})</h3>
               <p className="text-xs text-stone-500">Все активные квартиры, доступные клиентам в приложении</p>
             </div>
+            {apartments.length > 0 && (
+              <button
+                type="button"
+                id="clear-all-apartments-btn"
+                onClick={() => setIsDeleteAllAptsOpen(true)}
+                className="bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 font-bold px-3.5 py-1.5 rounded-xl text-xs flex items-center gap-1.5 transition-all cursor-pointer"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Удалить все объекты</span>
+              </button>
+            )}
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {apartments.map((apt) => (
-              <div key={apt.id} className="border border-stone-200 rounded-2xl overflow-hidden p-3 flex gap-3 bg-stone-50/50">
-                <img
-                  src={apt.images[0]}
-                  alt={apt.title}
-                  className="w-20 h-20 rounded-xl object-cover flex-shrink-0"
-                />
-                <div className="min-w-0 flex-1 flex flex-col justify-between">
-                  <div>
-                    <h4 className="font-bold text-xs text-stone-900 truncate">{apt.title}</h4>
-                    <p className="text-[11px] text-stone-500 truncate">{apt.district}</p>
-                    <div className="text-xs font-black text-rose-600 mt-0.5">${apt.priceUsd}/мес</div>
+          {/* Catalog Toast */}
+          {catalogZipToast && (
+            <div className="p-3.5 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs font-semibold flex items-center gap-2 animate-in fade-in">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+              <span>{catalogZipToast}</span>
+            </div>
+          )}
+
+          {apartments.length === 0 ? (
+            <div className="bg-stone-50 border border-dashed border-stone-200 rounded-3xl p-10 text-center flex flex-col items-center justify-center">
+              <div className="w-14 h-14 rounded-2xl bg-rose-50 text-rose-500 flex items-center justify-center mb-3">
+                <Home className="w-7 h-7" />
+              </div>
+              <h4 className="text-base font-bold text-stone-800">Каталог пуст</h4>
+              <p className="text-xs text-stone-500 max-w-sm mt-1 mb-4">
+                Все тестовые объекты удалены. Загрузите реальные квартиры через ZIP-архив с фото или PDF либо заполните анкету вручную.
+              </p>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setAdminTab('upload_pdf')}
+                  className="bg-rose-500 hover:bg-rose-600 text-white text-xs font-bold px-4 py-2 rounded-xl transition cursor-pointer shadow-xs flex items-center gap-1.5"
+                >
+                  <Archive className="w-3.5 h-3.5" />
+                  <span>Загрузить ZIP с фото / PDF</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAdminTab('upload_form')}
+                  className="bg-stone-900 hover:bg-black text-white text-xs font-bold px-4 py-2 rounded-xl transition cursor-pointer shadow-xs"
+                >
+                  Заполнить анкету
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {apartments.map((apt) => (
+                <div key={apt.id} className="border border-stone-200 rounded-2xl overflow-hidden p-3 flex gap-3 bg-stone-50/50 hover:shadow-xs transition">
+                  <div className="relative w-20 h-20 rounded-xl overflow-hidden flex-shrink-0 bg-stone-900">
+                    <img
+                      src={apt.images[0]}
+                      alt={apt.title}
+                      className="w-full h-full object-cover"
+                    />
+                    <div className="absolute bottom-1 left-1 bg-stone-950/80 text-white text-[9px] font-bold px-1 py-0.5 rounded flex items-center gap-0.5">
+                      <ImageIcon className="w-2.5 h-2.5 text-rose-400" />
+                      <span>{apt.images.length}</span>
+                    </div>
                   </div>
-                  <div className="flex items-center justify-between text-[10px] text-stone-400 pt-1">
-                    <span>{apt.rooms} комн. • {apt.areaSqm} м²</span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (window.confirm(`Удалить объект «${apt.title}»?`)) {
-                          onDeleteApartment(apt.id);
+                  <div className="min-w-0 flex-1 flex flex-col justify-between">
+                    <div>
+                      <h4 className="font-bold text-xs text-stone-900 truncate">{apt.title}</h4>
+                      <p className="text-[11px] text-stone-500 truncate">{apt.district}</p>
+                      <div className="text-xs font-black text-rose-600 mt-0.5">
+                        {apt.currency === 'GEL' 
+                          ? `${apt.priceGel || Math.round(apt.priceUsd * 2.72)} ₾ (~$${apt.priceUsd})/мес`
+                          : `$${apt.priceUsd} (~${apt.priceGel || Math.round(apt.priceUsd * 2.72)} ₾)/мес`
                         }
-                      }}
-                      className="text-stone-400 hover:text-rose-500 p-1 cursor-pointer"
-                      title="Удалить"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between text-[10px] text-stone-400 pt-1">
+                      <span>{apt.rooms} комн. • {apt.areaSqm} м²</span>
+                      <div className="flex items-center gap-1">
+                        <label className="text-stone-600 hover:text-rose-600 hover:bg-rose-50 px-2 py-1 rounded-lg cursor-pointer transition flex items-center gap-1 border border-stone-200 hover:border-rose-200 text-[10px] font-bold" title="Загрузить ZIP-архив с фото для этого объекта">
+                          <Archive className="w-3 h-3 text-rose-500" />
+                          <span>ZIP фото</span>
+                          <input
+                            type="file"
+                            accept=".zip,application/zip,application/x-zip-compressed"
+                            className="hidden"
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file) handleUpdateApartmentPhotosFromZip(apt, file);
+                            }}
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => handleRequestDeleteApartment(apt)}
+                          className="text-stone-400 hover:text-rose-500 hover:bg-rose-50 p-1.5 rounded-lg cursor-pointer transition"
+                          title="Удалить объект"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
+      )}
+
+      {/* SECTION 5: PWA APPLICATION GENERATOR & SETTINGS */}
+      {adminTab === 'pwa' && (
+        <AdminPwaSection />
       )}
 
       {/* Modal for adding manual CRM lead */}
@@ -1177,6 +2309,138 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Confirmation Modal 1: Delete Single Lead */}
+      {leadToDelete && (
+        <div className="fixed inset-0 z-50 bg-stone-950/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl p-6 max-w-sm w-full border border-stone-200 shadow-2xl space-y-4">
+            <div className="w-12 h-12 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center mx-auto">
+              <Trash2 className="w-6 h-6" />
+            </div>
+            <div className="text-center">
+              <h3 className="text-base font-bold text-stone-900">Удалить клиента из CRM?</h3>
+              <p className="text-xs text-stone-500 mt-1.5 leading-relaxed">
+                Вы действительно хотите удалить клиента <strong className="text-stone-800">{leadToDelete.clientName}</strong> ({leadToDelete.clientPhone}) из воронки?
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setLeadToDelete(null)}
+                className="py-2.5 px-4 bg-stone-100 hover:bg-stone-200 text-stone-700 font-bold rounded-xl text-xs transition cursor-pointer"
+              >
+                Отмена
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDeleteLead}
+                className="py-2.5 px-4 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-xs transition shadow-xs cursor-pointer"
+              >
+                Да, удалить
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirmation Modal 2: Clear All Leads */}
+      {isDeleteAllLeadsOpen && (
+        <div className="fixed inset-0 z-50 bg-stone-950/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl p-6 max-w-sm w-full border border-stone-200 shadow-2xl space-y-4 text-center">
+            <div className="w-12 h-12 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center mx-auto">
+              <AlertTriangle className="w-6 h-6" />
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-stone-900">Очистить всю базу клиентов?</h3>
+              <p className="text-xs text-stone-500 mt-1.5 leading-relaxed">
+                Все клиенты ({leads.length}) будут безвозвратно удалены из всех 4-х этапов воронки CRM.
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setIsDeleteAllLeadsOpen(false)}
+                className="py-2.5 px-4 bg-stone-100 hover:bg-stone-200 text-stone-700 font-bold rounded-xl text-xs transition cursor-pointer"
+              >
+                Отмена
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmClearAllLeads}
+                className="py-2.5 px-4 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-xs shadow-xs transition cursor-pointer"
+              >
+                Удалить всех
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirmation Modal 3: Delete Single Apartment */}
+      {aptToDelete && (
+        <div className="fixed inset-0 z-50 bg-stone-950/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl p-6 max-w-sm w-full border border-stone-200 shadow-2xl space-y-4 text-center">
+            <div className="w-12 h-12 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center mx-auto">
+              <Trash2 className="w-6 h-6" />
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-stone-900">Удалить объект?</h3>
+              <p className="text-xs text-stone-500 mt-1.5 leading-relaxed">
+                Квартира «<strong className="text-stone-800">{aptToDelete.title}</strong>» будет удалена из ленты свайпов, каталога и карты.
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setAptToDelete(null)}
+                className="py-2.5 px-4 bg-stone-100 hover:bg-stone-200 text-stone-700 font-bold rounded-xl text-xs transition cursor-pointer"
+              >
+                Отмена
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDeleteApartment}
+                className="py-2.5 px-4 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-xs shadow-xs transition cursor-pointer"
+              >
+                Удалить
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirmation Modal 4: Clear All Apartments */}
+      {isDeleteAllAptsOpen && (
+        <div className="fixed inset-0 z-50 bg-stone-950/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl p-6 max-w-sm w-full border border-stone-200 shadow-2xl space-y-4 text-center">
+            <div className="w-12 h-12 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center mx-auto">
+              <AlertTriangle className="w-6 h-6" />
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-stone-900">Удалить все объекты?</h3>
+              <p className="text-xs text-stone-500 mt-1.5 leading-relaxed">
+                Все {apartments.length} объектов будут удалены. База будет пуста, пока вы не загрузите новые объекты через PDF или анкету.
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setIsDeleteAllAptsOpen(false)}
+                className="py-2.5 px-4 bg-stone-100 hover:bg-stone-200 text-stone-700 font-bold rounded-xl text-xs transition cursor-pointer"
+              >
+                Отмена
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmClearAllApartments}
+                className="py-2.5 px-4 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-xs shadow-xs transition cursor-pointer"
+              >
+                Удалить все
+              </button>
+            </div>
           </div>
         </div>
       )}

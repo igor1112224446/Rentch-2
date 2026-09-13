@@ -58,7 +58,7 @@ export const SwipeCard: React.FC<SwipeCardProps> = ({
     setCurrentImageIndex((prev) => (prev - 1 + apartment.images.length) % apartment.images.length);
   };
 
-  const gelPrice = Math.round(apartment.priceUsd * 2.72);
+  const gelPrice = apartment.priceGel || Math.round(apartment.priceUsd * 2.72);
 
   const furnitureText = {
     full: 'С мебелью',
@@ -166,10 +166,10 @@ export const SwipeCard: React.FC<SwipeCardProps> = ({
             <div>
               <div className="flex items-baseline gap-2">
                 <span className="text-3xl font-extrabold tracking-tight">
-                  ${apartment.priceUsd}
+                  {apartment.currency === 'GEL' ? `${gelPrice} ₾` : `$${apartment.priceUsd}`}
                 </span>
                 <span className="text-xs text-stone-300 font-medium">
-                  / мес (~{gelPrice} ₾)
+                  {apartment.currency === 'GEL' ? `/ мес (~$${apartment.priceUsd})` : `/ мес (~${gelPrice} ₾)`}
                 </span>
               </div>
               <p className="text-xs text-stone-200 mt-0.5 flex items-center gap-1 line-clamp-1">

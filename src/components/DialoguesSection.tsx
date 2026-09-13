@@ -60,33 +60,36 @@ export const DialoguesSection: React.FC<DialoguesSectionProps> = ({
   }
 
   return (
-    <div id="dialogues-section" className="max-w-3xl mx-auto py-4 px-2 sm:px-4 space-y-4 pb-24">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-1">
+    <div id="dialogues-section" className="max-w-3xl mx-auto py-2 sm:py-4 px-1 sm:px-4 space-y-2.5 sm:space-y-4 pb-20">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-3 px-1">
         <div>
-          <h2 className="text-xl font-extrabold text-stone-900 flex items-center gap-2">
-            <MessageCircle className="w-5 h-5 text-rose-500" />
+          <h2 className="text-base sm:text-xl font-extrabold text-stone-900 flex items-center gap-2">
+            <MessageCircle className="w-4 h-4 sm:w-5 sm:h-5 text-rose-500" />
             <span>Диалоги по аренде</span>
+            <span className="text-xs bg-stone-100 text-stone-600 font-bold px-2 py-0.5 rounded-full">
+              {activeDialogues.length}
+            </span>
           </h2>
-          <p className="text-xs text-stone-500 mt-0.5">
+          <p className="hidden sm:block text-xs text-stone-500 mt-0.5">
             Обсуждение условий и согласование времени осмотра квартир в Тбилиси
           </p>
         </div>
 
         {/* Search input */}
         <div className="relative w-full sm:w-64">
-          <Search className="w-4 h-4 text-stone-400 absolute left-3 top-1/2 -translate-y-1/2" />
+          <Search className="w-3.5 h-3.5 text-stone-400 absolute left-3 top-1/2 -translate-y-1/2" />
           <input
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Поиск по диалогам..."
-            className="w-full bg-white border border-stone-200 rounded-2xl pl-9 pr-4 py-2 text-xs text-stone-900 focus:outline-none focus:ring-2 focus:ring-rose-500"
+            className="w-full bg-white border border-stone-200 rounded-xl sm:rounded-2xl pl-8 sm:pl-9 pr-3 py-1.5 sm:py-2 text-xs text-stone-900 focus:outline-none focus:ring-2 focus:ring-rose-500"
           />
         </div>
       </div>
 
       {/* Dialogues list */}
-      <div className="space-y-3">
+      <div className="space-y-2 sm:space-y-3">
         {activeDialogues.map((apt) => {
           const chat = chats[apt.id];
           const messages = chat?.messages || [];
@@ -98,67 +101,74 @@ export const DialoguesSection: React.FC<DialoguesSectionProps> = ({
               key={apt.id}
               id={`dialogue-item-${apt.id}`}
               onClick={() => onOpenChat(apt)}
-              className="bg-white rounded-3xl p-4 border border-stone-200 hover:border-rose-300 hover:shadow-md transition-all cursor-pointer flex items-center justify-between gap-3 group"
+              className="bg-white rounded-2xl sm:rounded-3xl p-2.5 sm:p-4 border border-stone-200/90 hover:border-rose-300 hover:shadow-md transition-all cursor-pointer flex items-center justify-between gap-2.5 sm:gap-3 group"
             >
-              <div className="flex items-center gap-3.5 min-w-0">
+              <div className="flex items-center gap-2.5 sm:gap-3.5 min-w-0 flex-1">
+                {/* Image */}
                 <div className="relative flex-shrink-0">
                   <img
                     src={apt.images[0]}
                     alt={apt.title}
-                    className="w-16 h-16 rounded-2xl object-cover border border-stone-100 group-hover:scale-105 transition-transform"
+                    className="w-12 h-12 sm:w-16 sm:h-16 rounded-xl sm:rounded-2xl object-cover border border-stone-100 group-hover:scale-105 transition-transform"
                   />
-                  <div className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-gradient-to-tr from-rose-500 to-amber-500 text-white flex items-center justify-center border-2 border-white shadow-xs">
-                    <Bot className="w-3.5 h-3.5" />
+                  <div className="absolute -bottom-1 -right-1 w-4 h-4 sm:w-6 sm:h-6 rounded-full bg-gradient-to-tr from-rose-500 to-amber-500 text-white flex items-center justify-center border sm:border-2 border-white shadow-xs">
+                    <Bot className="w-2.5 h-2.5 sm:w-3.5 sm:h-3.5" />
                   </div>
                 </div>
 
+                {/* Content */}
                 <div className="min-w-0 flex-1">
-                  <div className="flex items-center justify-between gap-2">
-                    <h4 className="font-bold text-sm text-stone-900 truncate">
-                      {apt.title}
-                    </h4>
-                    <span className="text-[11px] text-stone-400 font-medium flex-shrink-0">
+                  {/* Top row: Title + Price + Time */}
+                  <div className="flex items-center justify-between gap-1.5">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <h4 className="font-bold text-xs sm:text-sm text-stone-900 truncate">
+                        {apt.title}
+                      </h4>
+                      <span className="text-[11px] sm:text-xs text-rose-600 font-extrabold flex-shrink-0">
+                        {apt.currency === 'GEL' ? `${apt.priceGel || Math.round(apt.priceUsd * 2.72)} ₾` : `$${apt.priceUsd}`}
+                      </span>
+                    </div>
+                    <span className="text-[10px] sm:text-[11px] text-stone-400 font-medium flex-shrink-0">
                       {lastMsg ? lastMsg.timestamp : 'Недавно'}
                     </span>
                   </div>
 
-                  <div className="flex items-center gap-2 text-xs text-stone-500 mt-0.5">
-                    <span className="text-rose-600 font-extrabold">${apt.priceUsd}/мес</span>
-                    <span>•</span>
-                    <span className="truncate">{apt.district.split(' ')[0]}</span>
-                  </div>
-
-                  <p className="text-xs text-stone-600 truncate mt-1 leading-snug">
+                  {/* Message snippet */}
+                  <p className="text-[11px] sm:text-xs text-stone-600 truncate mt-0.5 leading-snug">
                     {lastMsg ? (
                       <>
                         <span className="font-semibold text-stone-700">
-                          {lastMsg.sender === 'user' ? 'Вы: ' : lastMsg.sender === 'bot' ? '🤖 Rentch Bot: ' : 'Менеджер: '}
+                          {lastMsg.sender === 'user' ? 'Вы: ' : lastMsg.sender === 'bot' ? '🤖 Бот: ' : 'Менеджер: '}
                         </span>
                         {lastMsg.text}
                       </>
                     ) : (
-                      'Робот готов предложить бронирование осмотра...'
+                      'Робот готов забронировать осмотр...'
                     )}
                   </p>
 
-                  <div className="mt-2 flex items-center gap-2">
+                  {/* Status chip */}
+                  <div className="mt-1 flex items-center gap-2">
                     {isViewingConfirmed ? (
-                      <span className="inline-flex items-center gap-1.5 text-[11px] text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-full font-bold border border-emerald-100">
-                        <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-                        <span>Осмотр забронирован: {chat.viewingSlot?.date} в {chat.viewingSlot?.time}</span>
+                      <span className="inline-flex items-center gap-1 text-[10px] sm:text-[11px] text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full font-bold border border-emerald-100">
+                        <CheckCircle2 className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-emerald-600 flex-shrink-0" />
+                        <span className="truncate">
+                          Осмотр: {chat.viewingSlot?.date} ({chat.viewingSlot?.time})
+                        </span>
                       </span>
                     ) : (
-                      <span className="inline-flex items-center gap-1.5 text-[11px] text-amber-700 bg-amber-50 px-2.5 py-0.5 rounded-full font-bold border border-amber-100">
-                        <Calendar className="w-3 h-3 text-amber-600" />
-                        <span>Требуется выбрать время осмотра</span>
+                      <span className="inline-flex items-center gap-1 text-[10px] sm:text-[11px] text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full font-bold border border-amber-100">
+                        <Calendar className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-amber-600 flex-shrink-0" />
+                        <span className="truncate">Выбрать время осмотра</span>
                       </span>
                     )}
                   </div>
                 </div>
               </div>
 
-              <div className="flex items-center text-stone-400 group-hover:text-rose-500 group-hover:translate-x-0.5 transition-all">
-                <ChevronRight className="w-5 h-5" />
+              {/* Chevron */}
+              <div className="flex items-center text-stone-400 group-hover:text-rose-500 group-hover:translate-x-0.5 transition-all flex-shrink-0">
+                <ChevronRight className="w-4 h-4 sm:w-5 sm:h-5" />
               </div>
             </div>
           );

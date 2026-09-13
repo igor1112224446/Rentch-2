@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { 
   Heart, 
   X, 
@@ -11,7 +11,10 @@ import {
   Info, 
   SlidersHorizontal, 
   Check, 
-  Sparkles 
+  Sparkles,
+  Building2,
+  Plus,
+  MapPin
 } from 'lucide-react';
 import { 
   Apartment, 
@@ -39,11 +42,94 @@ import { DialoguesSection } from './components/DialoguesSection';
 import { ApartmentDetailsModal } from './components/ApartmentDetailsModal';
 import { AdminPanel } from './components/AdminPanel';
 import { RealTimeNotificationToast } from './components/RealTimeNotificationToast';
+import { AuthModal } from './components/AuthModal';
+import { OfflineIndicator } from './components/OfflineIndicator';
+
+const FAKE_MOCK_IDS = new Set([
+  'apt-catalog-1',
+  'apt-catalog-2',
+  'apt-catalog-3',
+  'apt-1',
+  'apt-2',
+  'apt-3',
+  'apt-4',
+  'apt-5',
+  'apt-6',
+  'apt-7',
+  'apt-8',
+]);
 
 export default function App() {
-  // App State
-  const [apartments, setApartments] = useState<Apartment[]>(INITIAL_APARTMENTS);
+  // App State - real apartments database synchronized with central backend
+  const [apartments, setApartments] = useState<Apartment[]>(() => {
+    try {
+      const saved = localStorage.getItem('rentch_apartments');
+      if (saved) {
+        const parsed: Apartment[] = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          // Strictly exclude any historical fictional mock apartments
+          return parsed.filter((a) => a && a.id && !FAKE_MOCK_IDS.has(a.id));
+        }
+      }
+    } catch (e) {
+      console.error(e);
+    }
+    return INITIAL_APARTMENTS;
+  });
+
+  // Fetch real apartments from server on startup and sync any locally created ones
+  useEffect(() => {
+    fetch('/api/apartments')
+      .then((res) => {
+        if (!res.ok) throw new Error('Network response not ok');
+        return res.json();
+      })
+      .then((serverApts: Apartment[]) => {
+        if (Array.isArray(serverApts) && serverApts.length > 0) {
+          const cleanServerApts = serverApts.filter((a) => !FAKE_MOCK_IDS.has(a.id));
+          setApartments(cleanServerApts);
+          localStorage.setItem('rentch_apartments', JSON.stringify(cleanServerApts));
+        } else {
+          // If server is empty, check if admin previously uploaded real apartments locally
+          const saved = localStorage.getItem('rentch_apartments');
+          if (saved) {
+            try {
+              const parsed: Apartment[] = JSON.parse(saved);
+              const realLocal = parsed.filter((a) => a && a.id && !FAKE_MOCK_IDS.has(a.id));
+              if (realLocal.length > 0) {
+                // Sync to central server so all users can see them
+                fetch('/api/apartments/sync', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ apartments: realLocal }),
+                })
+                  .then(() => {
+                    setApartments(realLocal);
+                  })
+                  .catch((err) => console.warn('Sync failed:', err));
+              }
+            } catch (err) {
+              console.error(err);
+            }
+          }
+        }
+      })
+      .catch((err) => {
+        console.warn('Backend server not yet ready or offline, using local storage:', err);
+      });
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem('rentch_apartments', JSON.stringify(apartments));
+  }, [apartments]);
+
   const [activeTab, setActiveTab] = useState<AppTab>('swipe');
+
+  // Authentication State
+  const [isAdminLoggedIn, setIsAdminLoggedIn] = useState<boolean>(() => {
+    return sessionStorage.getItem('rentch_admin_auth') === 'true';
+  });
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
 
   // Swiping State
   const [likedIds, setLikedIds] = useState<string[]>([]);
@@ -61,8 +147,32 @@ export default function App() {
     telegramNotificationsEnabled: false,
   });
 
-  // CRM Leads State (preloaded + synced with user actions)
-  const [crmLeads, setCrmLeads] = useState<CrmLead[]>(INITIAL_CRM_LEADS);
+  // CRM Leads State (persistent storage, purged of all fictional mock leads)
+  const [crmLeads, setCrmLeads] = useState<CrmLead[]>(() => {
+    try {
+      const saved = localStorage.getItem('rentch_crm_leads');
+      if (saved) {
+        const parsed: CrmLead[] = JSON.parse(saved);
+        // Exclude all mock leads; only retain real customer actions or manual admin entries
+        return parsed.filter(
+          (l) =>
+            !/^lead-[0-9]+$/.test(l.id) &&
+            (l.id.startsWith('lead-custom-') ||
+              l.id.startsWith('lead-client-') ||
+              l.id.startsWith('lead-viewing-') ||
+              l.id.startsWith('lead-reg-') ||
+              l.id.startsWith('lead-chat-'))
+        );
+      }
+    } catch (e) {
+      console.error(e);
+    }
+    return INITIAL_CRM_LEADS; // []
+  });
+
+  useEffect(() => {
+    localStorage.setItem('rentch_crm_leads', JSON.stringify(crmLeads));
+  }, [crmLeads]);
 
   // Filters
   const [filters, setFilters] = useState<FilterState>({
@@ -92,9 +202,8 @@ export default function App() {
       title: 'Добро пожаловать в Rentch!',
       message: 'Свайпайте вправо понравившиеся квартиры в Тбилиси, чтобы обсудить условия аренды и записаться на осмотр.',
       timestamp: 'только что',
-      apartmentId: 'apt-1',
       read: false,
-      type: 'new_listing',
+      type: 'system',
     },
   ]);
   const [activeToast, setActiveToast] = useState<NotificationItem | null>(null);
@@ -360,13 +469,107 @@ export default function App() {
     }
   };
 
+  // Authentication Handlers
+  const handleLoginTenant = (profileData: Partial<UserProfile>) => {
+    setUserProfile((prev) => ({
+      ...prev,
+      ...profileData,
+      isRegistered: true,
+    }));
+    const newNotif: NotificationItem = {
+      id: 'notif-auth-' + Date.now(),
+      title: 'Вход выполнен',
+      message: `Добро пожаловать в Rentch, ${profileData.name || 'арендатор'}! Вы авторизованы.`,
+      timestamp: 'только что',
+      read: false,
+      type: 'new_listing',
+    };
+    setNotifications((prev) => [newNotif, ...prev]);
+    setActiveToast(newNotif);
+  };
+
+  const handleLoginAdmin = () => {
+    setIsAdminLoggedIn(true);
+    sessionStorage.setItem('rentch_admin_auth', 'true');
+    setActiveTab('admin');
+    const newNotif: NotificationItem = {
+      id: 'notif-admin-' + Date.now(),
+      title: 'Режим Администратора',
+      message: 'Вы успешно вошли как администратор. Доступна CRM и панель объектов.',
+      timestamp: 'только что',
+      read: false,
+      type: 'new_listing',
+    };
+    setNotifications((prev) => [newNotif, ...prev]);
+    setActiveToast(newNotif);
+  };
+
+  const handleLogout = () => {
+    setIsAdminLoggedIn(false);
+    sessionStorage.removeItem('rentch_admin_auth');
+    setUserProfile((prev) => ({
+      ...prev,
+      isRegistered: false,
+      name: '',
+    }));
+    if (activeTab === 'admin') {
+      setActiveTab('swipe');
+    }
+  };
+
   // Property addition handlers for Admin
   const handleAddApartment = (newApt: Apartment) => {
-    setApartments((prev) => [newApt, ...prev]);
+    setApartments((prev) => [newApt, ...prev.filter((a) => a.id !== newApt.id)]);
+    // Ensure new apartment is ready for instant swiping
+    setLikedIds((prev) => prev.filter((id) => id !== newApt.id));
+    setDislikedIds((prev) => prev.filter((id) => id !== newApt.id));
+
+    // Save to server so all users can see it immediately
+    fetch('/api/apartments', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newApt),
+    }).catch((err) => console.warn('Server save error:', err));
+
+    // Expand price filter if new apartment is outside current filter range
+    setFilters((prev) => ({
+      ...prev,
+      minPrice: Math.min(prev.minPrice, newApt.priceUsd),
+      maxPrice: Math.max(prev.maxPrice, newApt.priceUsd),
+    }));
+
+    // Notify client in-app
+    const priceText = newApt.currency === 'GEL'
+      ? `${newApt.priceGel || Math.round(newApt.priceUsd * 2.72)} ₾/мес (~$${newApt.priceUsd})`
+      : `$${newApt.priceUsd}/мес (~${newApt.priceGel || Math.round(newApt.priceUsd * 2.72)} ₾)`;
+
+    const newNotif: NotificationItem = {
+      id: 'notif-new-' + Date.now(),
+      type: 'new_listing',
+      title: 'Новый объект в Rentch!',
+      message: `${newApt.title} в районе ${newApt.district} (${priceText}) добавлен и предложен клиентам!`,
+      timestamp: 'только что',
+      read: false,
+      apartmentId: newApt.id,
+    };
+    setNotifications((prev) => [newNotif, ...prev]);
+    setActiveToast(newNotif);
   };
 
   const handleDeleteApartment = (id: string) => {
     setApartments((prev) => prev.filter((a) => a.id !== id));
+    fetch(`/api/apartments/${id}`, { method: 'DELETE' }).catch((err) =>
+      console.warn('Server delete error:', err)
+    );
+  };
+
+  const handleUpdateApartment = (updatedApt: Apartment) => {
+    setApartments((prev) => prev.map((a) => (a.id === updatedApt.id ? updatedApt : a)));
+    fetch('/api/apartments', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updatedApt),
+    }).catch((err) => console.warn('Server update error:', err));
   };
 
   const hasActiveFilters = 
@@ -379,10 +582,14 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-stone-50 flex flex-col selection:bg-rose-500 selection:text-white font-sans text-stone-900">
-      {/* Top minimal header with official Rentch logo */}
+      <OfflineIndicator />
+      {/* Top minimal header with official Rentch logo and Auth Button */}
       <TopBar
         notifications={notifications}
         onOpenNotifications={() => setActiveTab('dialogues')}
+        isAdmin={isAdminLoggedIn}
+        userProfile={userProfile}
+        onOpenAuth={() => setIsAuthModalOpen(true)}
       />
 
       {/* Main View Container */}
@@ -439,6 +646,8 @@ export default function App() {
                       }}
                       onInfoClick={(apt) => setDetailsModalApartment(apt)}
                       isTopCard={true}
+                      isAdmin={isAdminLoggedIn}
+                      onDelete={handleDeleteApartment}
                     />
                   )}
                 </>
@@ -448,35 +657,94 @@ export default function App() {
                   id="empty-deck-card"
                   className="w-full h-full rounded-3xl border-2 border-dashed border-stone-200 bg-white p-8 flex flex-col items-center justify-center text-center shadow-sm"
                 >
-                  <div className="w-16 h-16 rounded-full bg-rose-50 text-rose-500 flex items-center justify-center mb-4">
-                    <Check className="w-8 h-8" />
-                  </div>
-                  <h3 className="text-xl font-bold text-stone-900">Вы просмотрели все варианты</h3>
-                  <p className="text-xs sm:text-sm text-stone-500 mt-2 max-w-xs leading-relaxed">
-                    Вы можете начать свайпать заново или скорректировать параметры в фильтрах.
-                  </p>
+                  {apartments.length === 0 ? (
+                    isAdminLoggedIn ? (
+                      <>
+                        <div className="w-16 h-16 rounded-full bg-rose-50 text-rose-500 flex items-center justify-center mb-4">
+                          <Building2 className="w-8 h-8" />
+                        </div>
+                        <h3 className="text-xl font-bold text-stone-900">База объектов пуста</h3>
+                        <p className="text-xs sm:text-sm text-stone-500 mt-2 max-w-xs leading-relaxed">
+                          В базе нет активных предложений. Вы можете добавить новые объекты в разделе CRM.
+                        </p>
 
-                  <div className="flex flex-col gap-2.5 mt-6 w-full max-w-xs">
-                    <button
-                      type="button"
-                      id="reset-swipes-btn"
-                      onClick={handleResetDeck}
-                      className="w-full bg-gradient-to-r from-rose-500 to-rose-600 hover:from-rose-600 hover:to-rose-700 text-white font-bold py-3 px-5 rounded-2xl text-xs sm:text-sm shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer"
-                    >
-                      <RotateCcw className="w-4 h-4" />
-                      <span>Начать свайпать заново</span>
-                    </button>
+                        <div className="flex flex-col gap-2.5 mt-6 w-full max-w-xs">
+                          <button
+                            type="button"
+                            id="empty-deck-to-admin-btn"
+                            onClick={() => setActiveTab('admin')}
+                            className="w-full bg-stone-900 hover:bg-black text-white font-bold py-3 px-5 rounded-2xl text-xs sm:text-sm shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer"
+                          >
+                            <Plus className="w-4 h-4" />
+                            <span>Добавить объект в CRM</span>
+                          </button>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="w-16 h-16 rounded-full bg-stone-100 text-stone-400 flex items-center justify-center mb-4">
+                          <Building2 className="w-8 h-8" />
+                        </div>
+                        <h3 className="text-xl font-bold text-stone-900">Объекты обновляются</h3>
+                        <p className="text-xs sm:text-sm text-stone-500 mt-2 max-w-xs leading-relaxed">
+                          По вашим критериям сейчас нет доступных вариантов. Скоро здесь появятся новые проверенные квартиры в Тбилиси!
+                        </p>
 
-                    <button
-                      type="button"
-                      id="open-filters-empty-btn"
-                      onClick={() => setIsFilterDrawerOpen(true)}
-                      className="w-full bg-stone-100 hover:bg-stone-200 text-stone-800 font-semibold py-3 px-5 rounded-2xl text-xs transition-colors flex items-center justify-center gap-2 cursor-pointer"
-                    >
-                      <SlidersHorizontal className="w-4 h-4" />
-                      <span>Изменить фильтры</span>
-                    </button>
-                  </div>
+                        <div className="flex flex-col gap-2.5 mt-6 w-full max-w-xs">
+                          <button
+                            type="button"
+                            id="empty-deck-to-map-btn"
+                            onClick={() => setActiveTab('map')}
+                            className="w-full bg-stone-900 hover:bg-black text-white font-bold py-3 px-5 rounded-2xl text-xs sm:text-sm shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer"
+                          >
+                            <MapPin className="w-4 h-4" />
+                            <span>Смотреть объекты на карте</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => setIsFilterDrawerOpen(true)}
+                            className="w-full bg-stone-100 hover:bg-stone-200 text-stone-800 font-semibold py-2.5 px-5 rounded-2xl text-xs transition-colors flex items-center justify-center gap-2 cursor-pointer"
+                          >
+                            <SlidersHorizontal className="w-4 h-4" />
+                            <span>Изменить фильтры поиска</span>
+                          </button>
+                        </div>
+                      </>
+                    )
+                  ) : (
+                    <>
+                      <div className="w-16 h-16 rounded-full bg-rose-50 text-rose-500 flex items-center justify-center mb-4">
+                        <Check className="w-8 h-8" />
+                      </div>
+                      <h3 className="text-xl font-bold text-stone-900">Вы просмотрели все варианты</h3>
+                      <p className="text-xs sm:text-sm text-stone-500 mt-2 max-w-xs leading-relaxed">
+                        Вы можете начать свайпать заново или скорректировать параметры в фильтрах.
+                      </p>
+
+                      <div className="flex flex-col gap-2.5 mt-6 w-full max-w-xs">
+                        <button
+                          type="button"
+                          id="reset-swipes-btn"
+                          onClick={handleResetDeck}
+                          className="w-full bg-gradient-to-r from-rose-500 to-rose-600 hover:from-rose-600 hover:to-rose-700 text-white font-bold py-3 px-5 rounded-2xl text-xs sm:text-sm shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer"
+                        >
+                          <RotateCcw className="w-4 h-4" />
+                          <span>Начать свайпать заново</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          id="open-filters-empty-btn"
+                          onClick={() => setIsFilterDrawerOpen(true)}
+                          className="w-full bg-stone-100 hover:bg-stone-200 text-stone-800 font-semibold py-3 px-5 rounded-2xl text-xs transition-colors flex items-center justify-center gap-2 cursor-pointer"
+                        >
+                          <SlidersHorizontal className="w-4 h-4" />
+                          <span>Изменить фильтры</span>
+                        </button>
+                      </div>
+                    </>
+                  )}
                 </div>
               )}
             </div>
@@ -578,7 +846,15 @@ export default function App() {
             apartments={apartments}
             onAddApartment={handleAddApartment}
             onDeleteApartment={handleDeleteApartment}
+            onClearAllApartments={() => setApartments([])}
+            onClearAllLeads={() => setCrmLeads([])}
             onClose={() => setActiveTab('swipe')}
+            onAuthSuccess={() => setIsAdminLoggedIn(true)}
+            onLogout={handleLogout}
+            onViewApartment={(apt) => setDetailsModalApartment(apt)}
+            onSwitchToSwipe={() => setActiveTab('swipe')}
+            onUpdateApartment={handleUpdateApartment}
+            isAdmin={isAdminLoggedIn}
           />
         )}
       </main>
@@ -593,6 +869,7 @@ export default function App() {
         onOpenProfile={() => setIsQuestionnaireOpen(true)}
         hasActiveFilters={hasActiveFilters}
         isRegistered={userProfile.isRegistered}
+        isAdmin={isAdminLoggedIn}
       />
 
       {/* Modal 1: The "Rentch!" Celebration Match Modal */}
@@ -653,6 +930,20 @@ export default function App() {
         onLike={(apt) => handleSwipeRight(apt)}
         onDislike={(apt) => handleSwipeLeft(apt)}
         isLiked={detailsModalApartment ? likedIds.includes(detailsModalApartment.id) : false}
+        isAdmin={isAdminLoggedIn}
+        onDelete={handleDeleteApartment}
+      />
+
+      {/* Modal 6: Authentication & Role Switcher */}
+      <AuthModal
+        isOpen={isAuthModalOpen}
+        onClose={() => setIsAuthModalOpen(false)}
+        isAdmin={isAdminLoggedIn}
+        userProfile={userProfile}
+        onLoginTenant={handleLoginTenant}
+        onLoginAdmin={handleLoginAdmin}
+        onLogout={handleLogout}
+        onOpenCrm={() => setActiveTab('admin')}
       />
     </div>
   );

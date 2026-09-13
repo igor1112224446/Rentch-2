@@ -140,7 +140,9 @@ export const RentchMatchModal: React.FC<RentchMatchModalProps> = ({
                 {apartment.title}
               </h3>
               <span className="text-rose-400 font-extrabold text-base">
-                ${apartment.priceUsd}/мес
+                {apartment.currency === 'GEL'
+                  ? `${apartment.priceGel || Math.round(apartment.priceUsd * 2.72)} ₾/мес`
+                  : `$${apartment.priceUsd}/мес`}
               </span>
             </div>
             <div className="flex items-center gap-1 text-xs text-stone-400 mt-1">

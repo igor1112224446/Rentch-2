@@ -84,7 +84,7 @@ export const TbilisiMap: React.FC<TbilisiMapProps> = ({
                 ? 'bg-stone-950 border-rose-500 text-white'
                 : 'bg-white border-rose-500 text-stone-900'
             }">
-              <span>$${apt.priceUsd}</span>
+              <span>${apt.currency === 'GEL' ? `${apt.priceGel || Math.round(apt.priceUsd * 2.72)} ₾` : `$${apt.priceUsd}`}</span>
               ${isLiked ? '<span>♥</span>' : ''}
             </div>
             <div class="w-2 h-2 mx-auto rotate-45 -mt-1 ${
@@ -149,7 +149,10 @@ export const TbilisiMap: React.FC<TbilisiMapProps> = ({
                 {selectedApartment.title}
               </h4>
               <div className="text-base font-extrabold text-stone-900 mt-1">
-                ${selectedApartment.priceUsd} <span className="text-xs text-stone-500 font-normal">/ мес</span>
+                {selectedApartment.currency === 'GEL'
+                  ? `${selectedApartment.priceGel || Math.round(selectedApartment.priceUsd * 2.72)} ₾ (~$${selectedApartment.priceUsd})`
+                  : `$${selectedApartment.priceUsd} (~${selectedApartment.priceGel || Math.round(selectedApartment.priceUsd * 2.72)} ₾)`}{' '}
+                <span className="text-xs text-stone-500 font-normal">/ мес</span>
               </div>
               <p className="text-[11px] text-stone-500 truncate mt-0.5">
                 {selectedApartment.address}

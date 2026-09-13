@@ -41,7 +41,7 @@ export const ApartmentDetailsModal: React.FC<ApartmentDetailsModalProps> = ({
 
   if (!isOpen || !apartment) return null;
 
-  const gelPrice = Math.round(apartment.priceUsd * 2.72);
+  const gelPrice = apartment.priceGel || Math.round(apartment.priceUsd * 2.72);
 
   const furnitureLabel = {
     full: 'Полностью меблирована (готова к заезду)',
@@ -131,8 +131,12 @@ export const ApartmentDetailsModal: React.FC<ApartmentDetailsModalProps> = ({
                   {apartment.district}
                 </span>
                 <div className="text-right">
-                  <span className="text-2xl font-extrabold text-stone-900">${apartment.priceUsd}</span>
-                  <span className="text-xs text-stone-500 ml-1">/ мес (~{gelPrice} ₾)</span>
+                  <span className="text-2xl font-extrabold text-stone-900">
+                    {apartment.currency === 'GEL' ? `${gelPrice} ₾` : `$${apartment.priceUsd}`}
+                  </span>
+                  <span className="text-xs text-stone-500 ml-1">
+                    {apartment.currency === 'GEL' ? `/ мес (~$${apartment.priceUsd})` : `/ мес (~${gelPrice} ₾)`}
+                  </span>
                 </div>
               </div>
 
